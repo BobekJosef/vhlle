@@ -9,7 +9,7 @@ LDFLAGS       = -O3
 
 CXXFLAGS     += $(ROOTCFLAGS)
 LIBS          = $(ROOTLIBS) $(SYSLIBS)
-
+CXXFLAGS     += -std=c++17
 vpath %.cpp src
 objdir     = obj
 

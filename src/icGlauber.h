@@ -26,6 +26,7 @@ public:
  ~ICGlauber(void);
  // energy density profile at given point in transverse plane
  double eProfile(double x, double y);
+ double eGaussian(double x, double y);
  // setIC: initializes entire hydro grid at a given initial proper time tau
  void setIC(Fluid *f, EoS *eos);
 };

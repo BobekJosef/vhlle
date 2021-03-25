@@ -45,6 +45,13 @@ double ICGlauber::eProfile(double x, double y) {
             1.0);
 }
 
+double ICGlauber::eGaussian(double x, double y){
+ const double epsilon_0=30.;
+ const double sigma=1.;
+ double value=epsilon_0*exp(-((x*x)+(y*y))/(2*sigma*sigma));
+ return value;
+}
+
 void ICGlauber::findRPhi(void) {
  _rphi = new double[nphi];
  for (int iphi = 0; iphi < nphi; iphi++) {
@@ -120,6 +127,7 @@ void ICGlauber::setIC(Fluid *f, EoS *eos) {
     double etaFactor;
     double eta1 = fabs(eta) < 1.3 ? 0.0 : fabs(eta) - 1.3;
     etaFactor = exp(-eta1 * eta1 / 2.1 / 2.1) * (fabs(eta) < 5.3 ? 1.0 : 0.0);
+    //e = eGaussian(x, y) * etaFactor;
     e = eProfile(x, y) * etaFactor;
     if (e < 0.5) e = 0.0;
     vx = vy = 0.0;

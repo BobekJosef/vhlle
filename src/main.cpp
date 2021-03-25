@@ -310,6 +310,16 @@ int main(int argc, char **argv) {
  f->initOutput(outputDir.c_str(), tau0);
  f->outputCorona(tau0);
 
+ //squared speed of sound check c_s^2
+ double cs2eMax=4;
+ double cs2eStep=.01;
+ string outcs2 = outputDir;
+ outcs2.append("/out.cs2.dat");
+ ofstream fcs2;
+ fcs2.open(outcs2.c_str());
+ for(double i=0; i<cs2eMax; i+=cs2eStep)
+     fcs2 << i <<setw(14) << eos->cs2(i) << endl;
+
  bool resized = false; // flag if the grid has been resized
  do {
   // small tau: decrease timestep by makins substeps, in order
@@ -328,6 +338,13 @@ int main(int argc, char **argv) {
   } else
    h->performStep();
   f->outputGnuplot(h->getTau());
+  f->outputFEA(h->getTau());                //flow, eccentricity, anisotropy
+  //if(h->getTau()>4.3 && h->getTau()<4.9)    //V_T @ tau=4.4 & tau=4.8
+  //f->outputVT(h->getTau());
+  double Pip_tau[]={tau0+dtau,tau0+0.5,tau0+1.0,tau0+1.5,tau0+2.0,tau0+2.5,tau0+3.0};
+  for(int j=0;j<static_cast<int>(sizeof(Pip_tau)/sizeof(Pip_tau[0])); j++)
+      if(h->getTau()>(Pip_tau[j]-(dtau/2)) && h->getTau()<(Pip_tau[j]+(dtau/2)))
+        f->outputPip(h->getTau());                //Pi/p
   f->outputSurface(h->getTau());
   if(h->getTau()>=tauResize and resized==false) {
    cout << "grid resize\n";

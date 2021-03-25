@@ -185,3 +185,11 @@ double EoSChiral::p(double e, double nb, double nq, double ns) {
  else
   return 0.2964 * e;
 }
+// dp/de derivative
+double EoSChiral::dpe(double e, double nb, double nq, double ns) {
+    double hstep=0.05;
+    if(e<hstep)
+        return ((p(e+hstep, nb , nq ,  ns) - p(e, nb , nq ,  ns)) / (hstep) );
+    else
+        return ((p(e+hstep, nb , nq ,  ns) - p(e-hstep, nb , nq ,  ns)) / (2*hstep) );
+}

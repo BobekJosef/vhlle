@@ -5,6 +5,8 @@
 #include <iostream>
 #include <sstream>
 #include <cstring>
+#include <filesystem>
+#include <vector>
 
 #include "eos.h"
 #include "eoChiral.h"
@@ -13,10 +15,10 @@
 #include "rmn.h"
 #include "s95p.h"
 
+namespace fs = std::filesystem;
 using namespace std;
 
 IcTrento::IcTrento(Fluid* f, const char* filename, double _tau0, const char* setup) {
- cout << "loading TRENTO IC\n";
  nx = f->getNX();
  ny = f->getNY();
  nz = f->getNZ();
@@ -31,6 +33,23 @@ IcTrento::IcTrento(Fluid* f, const char* filename, double _tau0, const char* set
  zmax = f->getZ(nz - 1);
 
  tau0 = _tau0;
+
+ nevents = 0;
+ string path(filename);
+ vector<string> filepaths;
+ cout<<"Loading TrENTO files from: "<< path << endl;
+ for(const auto & entry : fs::directory_iterator(path))
+ {
+     cout << entry.path() << endl;
+     filepaths.push_back(entry.path());
+     nevents++;
+ }
+ if(filepaths.empty())
+ {
+     cerr<<"No files to load!\n";
+     exit(0);
+ }
+ cout<<"Loaded " << nevents << " TrENTO files\n";
 
  if(strcmp(setup,"LHC276")==0) {
   sNN = 2760;
@@ -118,26 +137,18 @@ IcTrento::IcTrento(Fluid* f, const char* filename, double _tau0, const char* set
   }
  }
  // ---- read the events
- nevents = 0;
- ifstream fin(filename);
+ ifstream fin(filepaths[0]);
  if (!fin.good()) {
-  cout << "I/O error with " << filename << endl;
+  cout << "I/O error with " << filepaths[0] << endl;
   exit(1);
  }
- int npart = 0;  // particle counter
+
  string line;
  istringstream instream;
- for (int i = 0; i < 3; i++) { // read first 3 lines - the 3rd line contains npart
-  getline(fin, line);
+
+ for (int i = 0; i < 10; i++) {
+     getline(fin, line);
  }
- instream.str(line);
- instream.seekg(9);
- instream >> npart; // read npart
- for (int i = 0; i < 5; i++) { // read the rest 5 lines from header
-  getline(fin, line);
- }
- getline(fin, line); // read grid-step
- getline(fin, line); // read grid-nsteps
  instream.str(line);
  instream.seekg(15);
  instream >> n_grid;
@@ -159,12 +170,48 @@ IcTrento::IcTrento(Fluid* f, const char* filename, double _tau0, const char* set
  xminG = -xmaxG;
  yminG = -xmaxG;
  cout << "Trento IS grid: x,ymaxG = " << xmaxG << "  n_grid = " << n_grid << endl;
- for (int iy = 0; iy < n_grid; iy++) {
-  for (int ix = 0; ix < n_grid; ix++) {
-   fin >> source[ix][iy];
-  }
+
+ double npart=0;
+ double npartValue;
+ double cellValue;
+
+ for(string file : filepaths)
+ {
+     ifstream inputFile(file);
+     if(!inputFile)
+     {
+         cerr<<"File "<< file <<" could not be opened.\n";
+         exit(0);
+     }
+
+     inputFile.ignore(1000, '\n'); // event
+     inputFile.ignore(1000, '\n'); // b
+
+     getline(inputFile, line);
+     instream.str(line);
+     instream.seekg(9);
+     instream >> npartValue;
+     npart += npartValue;
+
+     for(int i=0; i<8; i++)
+         inputFile.ignore(1000, '\n');
+
+     for (int iy = 0; iy < n_grid; iy++)
+         for (int ix = 0; ix < n_grid; ix++)
+         {
+             inputFile >> cellValue;
+             source[ix][iy] += cellValue;
+         }
  }
- cout << "npart = " << npart << "\n";
+
+ //average values
+ for (int iy = 0; iy < n_grid; iy++)
+     for (int ix = 0; ix < n_grid; ix++)
+         source[ix][iy] /= nevents;
+
+ npart /= nevents;
+ cout<<"Number of participants: "<< npart <<endl;
+
  makeSmoothTable(npart);
 
  // autocalculation of sNorm and nNorm
@@ -221,9 +268,9 @@ double IcTrento::interpolateGrid(double x, double y) {
  return return_val;
 }
 
-void IcTrento::makeSmoothTable(int npart) {
+void IcTrento::makeSmoothTable(double npart) {
  if (sNN == 27) {
-  double cent = (double)npart/(2.*197.); // our measure of centrality
+  double cent = npart/(2.*197.); // our measure of centrality
   eta0 = 0.888 - 0.213*cent;
   sigEta = 1.088 - 0.213*cent;
   neta0 = 1.332 - 0.319*cent;
@@ -328,7 +375,7 @@ void IcTrento::setIC(Fluid* f, EoS* eos) {
  //exit(1);
 }
 
-double IcTrento::setNormalization(int npart) {
+double IcTrento::setNormalization(double npart) {
  double e;
  double total_energy = 0.0;
  for (int ix = 0; ix < nx; ix++)
@@ -342,7 +389,7 @@ double IcTrento::setNormalization(int npart) {
  return npart*0.5*sNN/total_energy;
 }
 
-double IcTrento::setBaryonNorm(int npart) {
+double IcTrento::setBaryonNorm(double npart) {
  double Nb = 0.0;
  double nb;
  for (int ix = 0; ix < nx; ix++)

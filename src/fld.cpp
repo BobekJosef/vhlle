@@ -37,7 +37,7 @@ using namespace std;
 
 namespace output{  // a namespace containing all the output streams
   ofstream fkw, fkw_dim, fxvisc, fyvisc, fdiagvisc, fx,
-     fy, fdiag, fz, faniz, f2d, ffreeze;
+     fy, fdiag, fz, faniz, f2d, ffreeze, ffea, fVT, fPip, fpiT;
 }
 
 // returns the velocities in cartesian coordinates, fireball rest frame.
@@ -136,6 +136,14 @@ void Fluid::initOutput(const char *dir, double tau0) {
  out2d.append("/out2D.dat");
  string outfreeze = dir;
  outfreeze.append("/freezeout.dat");
+ string outfea = dir;
+ outfea.append("/out.fea.dat");
+ string outVT = dir;
+ outVT.append("/out.VT.dat");
+ string outPip = dir;
+ outPip.append("/out.Pip.dat");
+ string outpiT = dir;
+ outpiT.append("/out.piT.dat");
  output::fx.open(outx.c_str());
  output::fy.open(outy.c_str());
  output::fz.open(outz.c_str());
@@ -146,10 +154,15 @@ void Fluid::initOutput(const char *dir, double tau0) {
  output::fdiagvisc.open(outdiagvisc.c_str());
  output::faniz.open(outaniz.c_str());
  output::ffreeze.open(outfreeze.c_str());
+ output::ffea.open(outfea.c_str());
+ output::fVT.open(outVT.c_str());
+ output::fPip.open(outPip.c_str());
+ output::fpiT.open(outpiT.c_str());
  //################################################################
  // important remark. for correct diagonal output, nx=ny must hold.
  //################################################################
  outputGnuplot(tau0);
+ outputFEA(tau0);
  output::faniz << "#  tau  <<v_T>>  e_p  e'_p  (to compare with SongHeinz)\n";
 }
 
@@ -422,6 +435,105 @@ void Fluid::outputGnuplot(double tau) {
         << c->getViscCorrCutFlag() << endl;
  }
  output::fz << endl;
+}
+
+void Fluid::outputFEA(double tau) {
+    double e, nb, nq, ns, vx, vy, vz, t, mub, muq, mus, p;
+    double x, y;
+    double Ux=0;
+    double Uy=0;
+
+    double Rflo1=0, Rflo2=0; //Radial flow
+    double Secc1=0, Secc2=0; //Spatial eccentricity
+    double Mani1=0, Mani2=0; //Momentum anisotropy
+
+
+    for (int ix = 0; ix < nx; ix++)
+        for (int iy = 0; iy < ny; iy++)
+        {
+            Cell *c = getCell(ix, iy, nz / 2);
+            getCMFvariables(c, tau, e, nb, nq, ns, vx, vy, vz);
+            eos->eos(e, nb, nq, ns, t, mub, muq, mus, p);
+            x=getX(ix);
+            y=getY(iy);
+
+            Ux=vx/sqrt(1-((vx*vx)*(vy*vy)*(vz*vz)));
+            Uy=vy/sqrt(1-((vx*vx)*(vy*vy)*(vz*vz)));
+
+            Rflo1+= e*sqrt(vx*vx+vy*vy)/sqrt(1.-sqrt(vx*vx+vy*vy)); //e v_T \gamma
+            Rflo2+= e/sqrt(1.-sqrt(vx*vx+vy*vy));                   //e \gamma
+
+            Secc1+= e*(y*y-x*x); //<y^2-x^2>
+            Secc2+= e*(y*y+x*x); //<x^2+y^2>
+
+            Mani1+= ((e*Ux*Ux)+(p*(1.+(Ux*Ux))))-((e*Uy*Uy)+(p*(1.+(Uy*Uy)))); // T_0^{xx} - T_0^{yy}
+            Mani2+= ((e*Ux*Ux)+(p*(1.+(Ux*Ux))))+((e*Uy*Uy)+(p*(1.+(Uy*Uy)))); // T_0^{xx} + T_0^{yy}
+        }
+
+    Rflo1=Rflo1/Rflo2;
+    Secc1=Secc1/Secc2;
+    Mani1=Mani1/Mani2;
+
+    output::ffea << setw(14) << tau << setw(14) << Rflo1 << setw(14) << Secc1 << setw(14) << Mani1 << endl;
+}
+
+void Fluid::outputVT(double tau) {
+    double e, nb, nq, ns, vx, vy, vz, t, mub, muq, mus, p;
+    double x, y;
+    double VT;
+
+    for (int ix = 0; ix < nx; ix++)
+        for (int iy = 0; iy < ny; iy++)
+        {
+            Cell *c = getCell(ix, iy, nz / 2);
+            getCMFvariables(c, tau, e, nb, nq, ns, vx, vy, vz);
+            eos->eos(e, nb, nq, ns, t, mub, muq, mus, p);
+            x=getX(ix);
+            y=getY(iy);
+
+            VT = e*sqrt(vx*vx+vy*vy)/sqrt(1.-sqrt(vx*vx+vy*vy)); //e v_T \gamma
+
+            output::fVT << setw(14) << tau << setw(14) << x << setw(14) << y << setw(14) << VT << endl;
+        }
+    output::fVT << endl;
+}
+
+void Fluid::outputPip(double tau) {
+    double e, nb, nq, ns, vx, vy, vz, t, mub, muq, mus, p;
+    double x, y;
+    double Pi, Pip, pi2, T2, piT;
+    double g_mumu[4]={1,-1,-1,-1};
+    for (int ix = 0; ix < nx; ix++)
+        for (int iy = 0; iy < ny; iy++) {
+            Cell *c = getCell(ix, iy, nz / 2);
+            getCMFvariables(c, tau, e, nb, nq, ns, vx, vy, vz);
+            eos->eos(e, nb, nq, ns, t, mub, muq, mus, p);
+            x = getX(ix);
+            y = getY(iy);
+
+            Pi = c->getPi();
+            if (p == 0)
+                Pip = 0;
+            else
+                Pip = Pi / p;
+
+            output::fPip << setw(14) << tau << setw(14) << x << setw(14) << y << setw(14) << Pip << endl;
+
+            pi2=0;
+            for (int mu = 0; mu<4; mu++)
+                for (int nu = 0; nu<4; nu++)
+                {
+                    pi2+=c->getpi(mu,nu)*c->getpi(mu,nu)*g_mumu[mu]*g_mumu[nu];
+                }
+
+            T2=e*e+(3*p*p);
+            if(T2==0)
+                piT=0;
+            else
+            piT=pi2/T2;
+            output::fpiT << setw(14) << tau << setw(14) << x << setw(14) << y << setw(14) << piT << endl;
+        }
+    output::fPip << endl;
 }
 
 // unput: geom. rapidity + velocities in Bjorken frame, --> output: velocities
