@@ -37,7 +37,7 @@ using namespace std;
 
 namespace output{  // a namespace containing all the output streams
   ofstream fkw, fkw_dim, fxvisc, fyvisc, fdiagvisc, fx,
-     fy, fdiag, fz, faniz, f2d, ffreeze, ffea, fVT, fPip, fpiT;
+     fy, fdiag, fz, faniz, f2d, ffreeze, ffea, fVT, fPip, fpiT, fICe;
 }
 
 // returns the velocities in cartesian coordinates, fireball rest frame.
@@ -144,6 +144,8 @@ void Fluid::initOutput(const char *dir, double tau0) {
  outPip.append("/out.Pip.dat");
  string outpiT = dir;
  outpiT.append("/out.piT.dat");
+ string outICe = dir;
+ outICe.append("/out.ICe.dat");
  output::fx.open(outx.c_str());
  output::fy.open(outy.c_str());
  output::fz.open(outz.c_str());
@@ -158,11 +160,13 @@ void Fluid::initOutput(const char *dir, double tau0) {
  output::fVT.open(outVT.c_str());
  output::fPip.open(outPip.c_str());
  output::fpiT.open(outpiT.c_str());
+ output::fICe.open(outICe.c_str());
  //################################################################
  // important remark. for correct diagonal output, nx=ny must hold.
  //################################################################
  outputGnuplot(tau0);
  outputFEA(tau0);
+ outputICe(tau0);
  output::faniz << "#  tau  <<v_T>>  e_p  e'_p  (to compare with SongHeinz)\n";
 }
 
@@ -496,6 +500,21 @@ void Fluid::outputVT(double tau) {
             output::fVT << setw(14) << tau << setw(14) << x << setw(14) << y << setw(14) << VT << endl;
         }
     output::fVT << endl;
+}
+
+void Fluid::outputICe(double tau0){
+    double e, nb, nq, ns, vx, vy, vz;
+
+    for (int ix = 0; ix < nx; ix++)
+    {
+        for (int iy = 0; iy < ny; iy++)
+        {
+            Cell *c = getCell(ix, iy, nz / 2);
+            getCMFvariables(c, tau0, e, nb, nq, ns, vx, vy, vz);
+            output::fICe << e << setw(14);
+        }
+        output::fICe << endl;
+    }
 }
 
 void Fluid::outputPip(double tau) {

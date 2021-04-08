@@ -37,13 +37,18 @@ IcTrento::IcTrento(Fluid* f, const char* filename, double _tau0, const char* set
  nevents = 0;
  string path(filename);
  vector<string> filepaths;
+ string source_averaged = path;
+ source_averaged.append("/averaged.dat");
+ ofstream source_output(source_averaged.c_str());
+
  cout<<"Loading TrENTO files from: "<< path << endl;
  for(const auto & entry : fs::directory_iterator(path))
- {
-     cout << entry.path() << endl;
-     filepaths.push_back(entry.path());
-     nevents++;
- }
+     if(entry.path()!=source_averaged)
+     {
+         cout << entry.path() << endl;
+         filepaths.push_back(entry.path());
+         nevents++;
+     }
  if(filepaths.empty())
  {
      cerr<<"No files to load!\n";
@@ -206,12 +211,17 @@ IcTrento::IcTrento(Fluid* f, const char* filename, double _tau0, const char* set
 
  //average values
  for (int iy = 0; iy < n_grid; iy++)
+ {
      for (int ix = 0; ix < n_grid; ix++)
+     {
          source[ix][iy] /= nevents;
+         source_output << source[ix][iy] << setw(14);
+     }
+     source_output << endl;
+ }
 
  npart /= nevents;
  cout<<"Number of participants: "<< npart <<endl;
-
  makeSmoothTable(npart);
 
  // autocalculation of sNorm and nNorm

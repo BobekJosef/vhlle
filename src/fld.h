@@ -66,6 +66,7 @@ public:
  void outputGnuplot(double tau);
  void outputFEA(double tau);
  void outputVT(double tau);
+ void outputICe(double tau0);
  void outputPip(double tau);
  void outputSurface(double tau);
  void outputCorona(double tau);
