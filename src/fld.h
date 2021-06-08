@@ -68,6 +68,9 @@ public:
  void outputVT(double tau);
  void outputICe(double tau0);
  void outputPip(double tau);
+ void outputViscousCorrections(double tau);
+ void outputAcausal(double tau);
+ void outputRaynolds(double tau);
  void outputSurface(double tau);
  void outputCorona(double tau);
  void InitialAnisotropies(double tau0);

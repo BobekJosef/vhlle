@@ -339,12 +339,15 @@ int main(int argc, char **argv) {
    h->performStep();
   f->outputGnuplot(h->getTau());
   f->outputFEA(h->getTau());                //flow, eccentricity, anisotropy
-  //if(h->getTau()>4.3 && h->getTau()<4.9)    //V_T @ tau=4.4 & tau=4.8
-  //f->outputVT(h->getTau());
-  double Pip_tau[]={tau0+dtau,tau0+0.5,tau0+1.0,tau0+1.5,tau0+2.0,tau0+2.5,tau0+3.0};
-  for(int j=0;j<static_cast<int>(sizeof(Pip_tau)/sizeof(Pip_tau[0])); j++)
-      if(h->getTau()>(Pip_tau[j]-(dtau/2)) && h->getTau()<(Pip_tau[j]+(dtau/2)))
-        f->outputPip(h->getTau());                //Pi/p
+  f->outputAcausal(h->getTau());
+  f->outputRaynolds(h->getTau());
+  double VisC_tau[]={tau0+dtau, 0.75, 1.00, 1.25, 1.50, 1.75, 2.00, 2.25,
+                     2.50, 2.75, 3.00, 3.25, 3.50, 3.75, 4.00, 4.25, 4.75,
+                     5.25, 5.75, 6.25, 6.75, 7.25, 7.75, 8.25, 8.75, 9.25,
+                     9.75, 10.25, 10.75};
+  for(int j=0;j<static_cast<int>(sizeof(VisC_tau)/sizeof(VisC_tau[0])); j++)
+      if(h->getTau()>(VisC_tau[j]-(dtau/3)) && h->getTau()<(VisC_tau[j]+(dtau/3)))
+	  f->outputViscousCorrections(h->getTau());                //Bulk & Shear corrections
   f->outputSurface(h->getTau());
   if(h->getTau()>=tauResize and resized==false) {
    cout << "grid resize\n";

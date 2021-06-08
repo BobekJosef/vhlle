@@ -37,7 +37,8 @@ using namespace std;
 
 namespace output{  // a namespace containing all the output streams
   ofstream fkw, fkw_dim, fxvisc, fyvisc, fdiagvisc, fx,
-     fy, fdiag, fz, faniz, f2d, ffreeze, ffea, fVT, fPip, fpiT, fICe;
+     fy, fdiag, fz, faniz, f2d, ffreeze, ffea, fVT, fPip,
+     fpiT, fICe, fvisccorr, fAcausal, fRaynolds;
 }
 
 // returns the velocities in cartesian coordinates, fireball rest frame.
@@ -146,6 +147,12 @@ void Fluid::initOutput(const char *dir, double tau0) {
  outpiT.append("/out.piT.dat");
  string outICe = dir;
  outICe.append("/out.ICe.dat");
+ string outvisccorr = dir;
+ outvisccorr.append("/out.visccorr.dat");
+ string outAcausal = dir;
+ outAcausal.append("/out.Acausal.dat");
+ string outRaynolds = dir;
+ outRaynolds.append("/out.Raynolds.dat");
  output::fx.open(outx.c_str());
  output::fy.open(outy.c_str());
  output::fz.open(outz.c_str());
@@ -161,6 +168,9 @@ void Fluid::initOutput(const char *dir, double tau0) {
  output::fPip.open(outPip.c_str());
  output::fpiT.open(outpiT.c_str());
  output::fICe.open(outICe.c_str());
+ output::fvisccorr.open(outvisccorr.c_str());
+ output::fAcausal.open(outAcausal.c_str());
+ output::fRaynolds.open(outRaynolds.c_str());
  //################################################################
  // important remark. for correct diagonal output, nx=ny must hold.
  //################################################################
@@ -464,11 +474,11 @@ void Fluid::outputFEA(double tau) {
             Ux=vx/sqrt(1-((vx*vx)*(vy*vy)*(vz*vz)));
             Uy=vy/sqrt(1-((vx*vx)*(vy*vy)*(vz*vz)));
 
-            Rflo1+= e*sqrt(vx*vx+vy*vy)/sqrt(1.-sqrt(vx*vx+vy*vy)); //e v_T \gamma
-            Rflo2+= e/sqrt(1.-sqrt(vx*vx+vy*vy));                   //e \gamma
+            Rflo1+= e*sqrt(vx*vx+vy*vy)/sqrt(1.-(vx*vx)-(vy*vy)); //e v_T \gamma
+            Rflo2+= e/sqrt(1.-(vx*vx)-(vy*vy));                   //e \gamma
 
-            Secc1+= e*(y*y-x*x); //<y^2-x^2>
-            Secc2+= e*(y*y+x*x); //<x^2+y^2>
+            Secc1+= e*((y*y)-(x*x)); //<y^2-x^2>
+            Secc2+= e*((y*y)+(x*x)); //<x^2+y^2>
 
             Mani1+= ((e*Ux*Ux)+(p*(1.+(Ux*Ux))))-((e*Uy*Uy)+(p*(1.+(Uy*Uy)))); // T_0^{xx} - T_0^{yy}
             Mani2+= ((e*Ux*Ux)+(p*(1.+(Ux*Ux))))+((e*Uy*Uy)+(p*(1.+(Uy*Uy)))); // T_0^{xx} + T_0^{yy}
@@ -504,7 +514,6 @@ void Fluid::outputVT(double tau) {
 
 void Fluid::outputICe(double tau0){
     double e, nb, nq, ns, vx, vy, vz;
-
     for (int ix = 0; ix < nx; ix++)
     {
         for (int iy = 0; iy < ny; iy++)
@@ -534,7 +543,7 @@ void Fluid::outputPip(double tau) {
             if (p == 0)
                 Pip = 0;
             else
-                Pip = Pi / p;
+                Pip = Pi/p;
 
             output::fPip << setw(14) << tau << setw(14) << x << setw(14) << y << setw(14) << Pip << endl;
 
@@ -549,14 +558,192 @@ void Fluid::outputPip(double tau) {
             if(T2==0)
                 piT=0;
             else
-            piT=pi2/T2;
+                piT=sqrt(abs(pi2/T2));
             output::fpiT << setw(14) << tau << setw(14) << x << setw(14) << y << setw(14) << piT << endl;
         }
     output::fPip << endl;
 }
 
+void Fluid::outputViscousCorrections(double tau){
+    double e, nb, nq, ns, vx, vy, vz, t, mub, muq, mus, p;
+    double x, y;
+    double Pi, Pip, pi2, T2, piT;
+    double g_mumu[4]={1,-1,-1,-1};
+    for (int ix = 0; ix < nx; ix++)
+        for (int iy = 0; iy < ny; iy++) {
+             Cell *c = getCell(ix, iy, nz / 2);
+             getCMFvariables(c, tau, e, nb, nq, ns, vx, vy, vz);
+             eos->eos(e, nb, nq, ns, t, mub, muq, mus, p);
+             x = getX(ix);
+             y = getY(iy);
+ 
+  	     Pi = c->getPi();
+             if (p == 0)
+                Pip = 0;
+             else
+                Pip = Pi / p;
+
+	     pi2=0;
+             for (int mu = 0; mu<4; mu++)
+                for (int nu = 0; nu<4; nu++)
+                    pi2+=c->getpi(mu,nu)*c->getpi(mu,nu)*g_mumu[mu]*g_mumu[nu];
+
+             T2=e*e+(3*p*p);
+             if(T2==0)
+                piT=0;
+             else
+                piT=pi2/T2;
+
+   	     output::fvisccorr << setw(14) << tau << setw(14) << x << setw(14) << y << setw(14) << Pip<< setw(14) << piT<< setw(14) << e << setw(14) << t << endl;
+      }
+}
+
+void Fluid::outputAcausal(double tau){
+ double nTot=0;
+ double nPip1=0;
+ double npiT1=0;
+ double nPip2=0;
+ double npiT2=0;
+ double nPip3=0;
+ double npiT3=0;
+ double npiT4=0;
+
+ double nTotT=0;
+ double nPip1T=0;
+ double npiT1T=0;
+ double nPip2T=0;
+ double npiT2T=0;
+ double nPip3T=0;
+ double npiT3T=0;
+ double npiT4T=0;
+
+ double e, nb, nq, ns, vx, vy, vz, t, mub, muq, mus, p;
+ double Pi, Pip, pi2, T2, piT;
+ double g_mumu[4]={1,-1,-1,-1};
+
+ for (int ix = 0; ix < nx; ix++)
+     for (int iy = 0; iy < ny; iy++) {
+	 Cell *c = getCell(ix, iy, nz / 2);
+	 getCMFvariables(c, tau, e, nb, nq, ns, vx, vy, vz);
+	 eos->eos(e, nb, nq, ns, t, mub, muq, mus, p);
+
+	 Pi = c->getPi();
+
+	 if (p == 0)
+	     Pip = 0;
+	 else
+	     Pip = Pi / p;
+
+	 pi2=0;
+	 for (int mu = 0; mu<4; mu++)
+	     for (int nu = 0; nu<4; nu++)
+	         pi2+=c->getpi(mu,nu)*c->getpi(mu,nu)*g_mumu[mu]*g_mumu[nu];
+
+	 T2=e*e+(3*p*p);
+
+	 if(T2==0)
+	     piT=0;
+         else
+             piT=sqrt(abs(pi2/T2));
+
+	 if(e>0)
+	     nTot++;
+	 if(Pip<-0.3)
+	     nPip1++;
+	 if(Pip<-0.5)
+	     nPip2++;
+	 if(Pip<-0.8)
+	     nPip3++;
+	 if(piT>0.3)
+	     npiT1++;
+	 if(piT>0.5)
+	     npiT2++;
+	 if(piT>1.0)
+	     npiT3++;
+	 if(piT>5.0)
+	     npiT4++;
+
+	 if(t>0.150)
+         {
+         nTotT++;
+         if(Pip<-0.3)
+             nPip1T++;
+         if(Pip<-0.5)
+             nPip2T++;
+         if(Pip<-0.8)
+             nPip3T++;
+         if(piT>0.3)
+             npiT1T++;
+         if(piT>0.5)
+             npiT2T++;
+         if(piT>1.0)
+             npiT3T++;
+         if(piT>5.0)
+             npiT4T++;
+         }
+    }
+
+    nPip1/=nTot;
+    nPip2/=nTot;
+    nPip3/=nTot;
+
+    npiT1/=nTot;
+    npiT2/=nTot;
+    npiT3/=nTot;
+    npiT4/=nTot;
+
+    nPip1T/=nTotT;
+    nPip2T/=nTotT;
+    nPip3T/=nTotT;
+
+    npiT1T/=nTotT;
+    npiT2T/=nTotT;
+    npiT3T/=nTotT;
+    npiT4T/=nTotT;
+
+    output::fAcausal << setw(14) << tau << setw(14) <<
+    nPip1 << setw(14) << nPip2 << setw(14) << nPip3 << setw(14) <<
+    nPip1T << setw(14) << nPip2T << setw(14) << nPip3T << setw(14) <<
+    npiT1 << setw(14) << npiT2 << setw(14) << npiT3 << setw(14) << npiT4 << setw(14) <<
+    npiT1T << setw(14) << npiT2T << setw(14) << npiT3T << setw(14) << npiT4T << setw(14)
+    << endl;
+}
+
+void Fluid::outputRaynolds(double tau) {
+    double R_pi=0;
+    double R_Pi=0;
+    double tot=0;
+    double e, nb, nq, ns, vx, vy, vz, t, mub, muq, mus, p;
+    double g_mumu[4]={1,-1,-1,-1};
+    double pi=0;
+    double Pi;
+    double Pip=0;
+
+    for (int ix = 0; ix < nx; ix++)
+        for (int iy = 0; iy < ny; iy++) {
+            Cell *c = getCell(ix, iy, nz / 2);
+            getCMFvariables(c, tau, e, nb, nq, ns, vx, vy, vz);
+            eos->eos(e, nb, nq, ns, t, mub, muq, mus, p);
+            if(t>=0.150)
+            {
+                Pi = c->getPi();
+                for (int mu = 0; mu<4; mu++)
+                    for (int nu = 0; nu<4; nu++)
+                        pi+=c->getpi(mu,nu)*c->getpi(mu,nu)*g_mumu[mu]*g_mumu[nu];
+                R_pi += sqrt(abs(pi)) / (e + p);
+                R_Pi += Pi / (e + p);
+		Pip += Pi/p;
+                tot++;
+            }
+       }
+	    cout<<"R_pi: "<<R_pi<<"    R_Pi: "<< R_Pi<<"    Pip: "<<Pip<<"   tot: "<<tot << endl;
+   R_pi /= tot;
+   R_Pi /= tot;
+
+   output::fRaynolds << setw(14) << tau << setw(14) << R_pi  << setw(14) << R_Pi << endl;
+}
+
 // unput: geom. rapidity + velocities in Bjorken frame, --> output: velocities
-// in lab.frame
 void transformToLab(double eta, double &vx, double &vy, double &vz) {
  const double Y = eta + 1. / 2. * log((1. + vz) / (1. - vz));
  vx = vx * cosh(Y - eta) / cosh(Y);
@@ -1022,7 +1209,7 @@ void Fluid::outputCorona(double tau) {
 
 
 void Fluid::InitialAnisotropies(double tau0) {
- double e, p, nb, nq, ns, t, mub, muq, mus, vx, vy, vz;
+ double e, nb, nq, ns, vx, vy, vz;
 
  double xcm = 0.0, xcm_nom = 0.0, xcm_denom = 0.0 ;
  double ycm = 0.0, ycm_nom = 0.0, ycm_denom = 0.0 ;
