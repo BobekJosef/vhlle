@@ -1,3 +1,4 @@
+#include <vector>
 #include "cll.h"
 
 class EoS;
@@ -22,13 +23,22 @@ private:
  double vEff, EtotSurf;  // cumulative effective volume and
  int compress2dOut;
 
+ // ---- scratch buffers used by outputSurface().
+ // The freeze-out surface finder needs the energy density at 16 corners of
+ // every space-time cube.  Recovering them cell-by-cell means each cell's
+ // primitive variables are re-derived 8 times (once per cube it belongs to).
+ // Instead we recover them once per timestep into these flat arrays.
+ std::vector<double> foE, foEprev, foP, foNb, foNq, foNs, foVx, foVy, foVz;
+ void cachePrimVars(double tau);   // fills the buffers above
+
  int num_corona_cells = -1; // number of corona cells. -1 means not set yet
  bool vorticityOn = false;
+ bool cartesian;
 
 public:
  Fluid(EoS *_eos, EoS *_eosH, TransportCoeff *_trcoeff, int _nx, int _ny,
        int _nz, double _minx, double _maxx, double _miny, double _maxy,
-       double _minz, double _maxz, double dt, double eCrit);
+       double _minz, double _maxz, double dt, double eCrit, bool _cartesian);
  ~Fluid();
  void initOutput(const char *dir, double tau0, bool hsOnly);
  void printDbetaHeader();
@@ -67,6 +77,10 @@ public:
  void getCMFvariables(Cell *c, double tau, double &e, double &nb, double &nq,
                       double &ns, double &vx, double &vy, double &Y);
 
+ inline int cellIndex(int ix, int iy, int iz) const {
+  return ix + nx * iy + nx * ny * iz;
+ }
+
  inline Cell *getCell(int ix, int iy, int iz) {
   ix = ix > 0 ? ix : 0;
   ix = ix < nx ? ix : nx - 1;
@@ -85,4 +99,6 @@ public:
  int outputSurface(double tau, bool extendFO);
  void outputCorona(double tau, bool extendFO);
  void InitialAnisotropies(double tau0);
+
+ void addParticle(Particle _particle);
 };

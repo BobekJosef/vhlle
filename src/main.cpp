@@ -29,11 +29,13 @@
 #include "ickw.h"
 #include "icPartUrqmd.h"
 #include "icPartSMASH.h"
+#include "icDynFlu.h"
 #include "icGlauber.h"
 #include "icGubser.h"
 #include "icGlissando.h"
 #include "icSuperMC.h"
 #include "icTrento.h"
+#include "icTest.h"
 #include "icTrento3d.h"
 #include "eos.h"
 #include "eo3.h"
@@ -47,7 +49,7 @@
 #include "trancoeff.h"
 #include "vtk.h"
 #include "colour.h"
-
+#include "particle.h"
 
 using namespace std;
 
@@ -67,6 +69,12 @@ void checkGridBorders(double min, double max, std::string _x) {
   }
 }
 
+bool parse_bool(const std::string& value) {
+    if (value == "1" || value == "true")  return true;
+    if (value == "0" || value == "false") return false;
+    throw std::runtime_error("Invalid boolean in config file: " + value);
+}
+
 int nx {100}, ny {100}, nz {100}, eosType {1}, etaSparam {0}, zetaSparam {0}, eosTypeHadron {0};
 // only FO hypersurface output: {0,1};  freezeout output extended by e,nb: {0,1}
 bool freezeoutOnly {false}, freezeoutExtend {false}, vorticityOn {false};
@@ -75,10 +83,12 @@ double xmin {-5.0}, xmax {5.0}, ymin {-5.0}, ymax {5.0}, etamin {-5.0},
   etaS {0.08}, zetaS {0.0}, eCrit {0.5}, etaSEpsilonMin {5.}, al {0.}, ah {0.}, aRho {0.}, T0 {0.15},
   etaSMin {0.08}, etaSShiftMuB {0.}, etaSScaleMuB {0.}, zetaSPeakEpsilon {5.},
   zetaSScaleBeta {0.103}, zetaSSigmaMinus {0.1}, zetaSSigmaPlus {0.1}, epsilon0, Rgt {1.0},
-  Rgz {1.0}, impactPar, s0ScaleFactor;
+  Rgz {1.0}, impactPar, s0ScaleFactor, gaussian_sigma {0.0};
 string collSystem, outputDir {"data"}, isInputFile, vtk_values {""};
 int icModel {1},glauberVariable  {1};  // icModel=1 for pure Glauber, 2 for table input (Glissando etc)
 int smoothingType {0}; // 0 for kernel contracted in eta, 1 for invariant kernel
+int minParticlesFO {15};  // dynIC
+bool cartesian {false};  // dynIC
 
 void readParameters(char *parFile) {
     char parName[255], parValue[255];
@@ -130,10 +140,13 @@ void readParameters(char *parFile) {
         {"etaSMin", [](const string& value) { etaSMin = atof(value.c_str()); }},
         {"etaSShiftMuB", [](const string& value) { etaSShiftMuB = atof(value.c_str()); }},
         {"etaSScaleMuB", [](const string& value) { etaSScaleMuB = atof(value.c_str()); }},
-        {"freezeoutOnly", [](const string& value) { freezeoutOnly = atoi(value.c_str()); }},
-        {"freezeoutExtend", [](const string& value) { freezeoutExtend = atoi(value.c_str()); }},
+        {"freezeoutOnly", [](const string& value) { freezeoutOnly = parse_bool(value.c_str()); }},
+        {"freezeoutExtend", [](const string& value) { freezeoutExtend = parse_bool(value.c_str()); }},
         {"vorticity", [](const string& value) { vorticityOn = atoi(value.c_str()); }},
         {"smoothingType", [](const string& value) { smoothingType = atoi(value.c_str()); }},
+        {"Gaussian_Sigma", [](const string& value) { gaussian_sigma = atof(value.c_str()); }},
+        {"minParticlesFO", [](const string& value) { minParticlesFO = atoi(value.c_str()); }},
+        {"cartesian", [](const string& value) { cartesian = parse_bool(value.c_str()); }},
     };
 
     while (fin.good()) {
@@ -156,90 +169,96 @@ void readParameters(char *parFile) {
 }
 
 void printParameters() {
- cout << "====== parameters ======\n";
- cout << "outputDir = " << outputDir << endl;
- cout << "freezeoutOnly = " << freezeoutOnly << endl;
- cout << "freezeoutExtend = " << freezeoutExtend << endl;
- cout << "vorticity = " << vorticityOn << endl;
- cout << "eosType = " << eosType << endl;
- cout << "eosTypeHadron = " << eosTypeHadron << endl;
- cout << "nx = " << nx << endl;
- cout << "ny = " << ny << endl;
- cout << "nz = " << nz << endl;
- cout << "icModel = " << icModel << endl;
- cout << "glauberVar = " << glauberVariable << "   ! 0=epsilon,1=entropy"
-      << endl;
- cout << "xmin = " << xmin << endl;
- cout << "xmax = " << xmax << endl;
- cout << "ymin = " << ymin << endl;
- cout << "ymax = " << ymax << endl;
- cout << "etamin = " << etamin << endl;
- cout << "etamax = " << etamax << endl;
- cout << "tau0 = " << tau0 << endl;
- cout << "tauMax = " << tauMax << endl;
- cout << "tauGridResize = " << tauResize << endl;
- cout << "dtau = " << dtau << endl;
- cout << "e_crit = " << eCrit << endl;
- cout << "zeta/s param : " << zetaSparam << endl;
- cout << "etaSparam = " << etaSparam << endl;
- if (etaSparam == 0){
+  cout << "====== parameters ======\n";
+  cout << "outputDir = " << outputDir << endl;
+  cout << "freezeoutOnly = " << freezeoutOnly << endl;
+  cout << "freezeoutExtend = " << freezeoutExtend << endl;
+  cout << "vorticity = " << vorticityOn << endl;
+  cout << "eosType = " << eosType << endl;
+  cout << "eosTypeHadron = " << eosTypeHadron << endl;
+  cout << "nx = " << nx << endl;
+  cout << "ny = " << ny << endl;
+  cout << "nz = " << nz << endl;
+  cout << "icModel = " << icModel << endl;
+  cout << "cartesian coordinate system = " << cartesian << endl;
+  cout << "glauberVar = " << glauberVariable << "   ! 0=epsilon,1=entropy"
+        << endl;
+  cout << "xmin = " << xmin << endl;
+  cout << "xmax = " << xmax << endl;
+  cout << "ymin = " << ymin << endl;
+  cout << "ymax = " << ymax << endl;
+  cout << "etamin = " << etamin << endl;
+  cout << "etamax = " << etamax << endl;
+  cout << "tau0 = " << tau0 << endl;
+  cout << "tauMax = " << tauMax << endl;
+  cout << "tauGridResize = " << tauResize << endl;
+  cout << "dtau = " << dtau << endl;
+  cout << "e_crit = " << eCrit << endl;
+  cout << "zeta/s param : " << zetaSparam << endl;
+  cout << "etaSparam = " << etaSparam << endl;
+  if (etaSparam == 0){
     cout << "eta/s = " << etaS << endl;
- }
- else if (etaSparam == 1){
+  }
+  else if (etaSparam == 1){
     cout << "al = " << al << endl;
     cout << "ah = " << ah << endl;
     cout << "etaSMin = " << etaSMin << endl;
     cout << "T0 = " << T0 << endl;
- }
- else if (etaSparam == 2){
+  }
+  else if (etaSparam == 2){
     cout << "al = " << al << endl;
     cout << "ah = " << ah << endl;
     cout << "aRho = " << aRho << endl;
     cout << "etaSMin = " << etaSMin << endl;
     cout << "etaSEpsilonMin = " << etaSEpsilonMin << endl;
- }
- else if (etaSparam == 3){
+  }
+  else if (etaSparam == 3){
     cout << "al = " << al << endl;
     cout << "ah = " << ah << endl;
     cout << "T0 = " << T0 << endl;
     cout << "etaSMin = " << etaSMin << endl;
     cout << "etaSShiftMuB = " << etaSShiftMuB << endl;
     cout << "etaSScaleMuB = " << etaSScaleMuB << endl;
- }
- cout << "zeta/s = " << zetaS << endl;
- if (zetaSparam == 4){
+  }
+  cout << "zeta/s = " << zetaS << endl;
+  if (zetaSparam == 4){
     cout << "zetaSPeakEpsilon = " << zetaSPeakEpsilon << endl;
     cout << "zetaSScaleBeta = " << zetaSScaleBeta << endl;
     cout << "zetaSSigmaMinus = " << zetaSSigmaMinus << endl;
     cout << "zetaSSigmaPlus = " << zetaSSigmaPlus << endl;
- }
- cout << "Rgt = " << Rgt << endl;
- cout << "Rgz = " << Rgz << endl;
- cout << "epsilon0 = " << epsilon0 << endl;
- cout << "smoothingType = " << smoothingType << endl;
- cout << "impactPar = " << impactPar << endl;
- cout << "s0ScaleFactor = " << s0ScaleFactor << endl;
- cout << "VTK_output_values = " << vtk_values << endl;
- cout << "======= end parameters =======\n";
+  }
+  if (icModel==10) {
+    cout << "Gaussian_Sigma = " << gaussian_sigma << endl;
+    cout << "minParticlesFO = " << minParticlesFO << endl;
+  } else {
+    cout << "Rgt = " << Rgt << endl;
+    cout << "Rgz = " << Rgz << endl;
+  }
+  cout << "epsilon0 = " << epsilon0 << endl;
+  cout << "smoothingType = " << smoothingType << endl;
+  cout << "impactPar = " << impactPar << endl;
+  cout << "s0ScaleFactor = " << s0ScaleFactor << endl;
+  cout << "VTK_output_values = " << vtk_values << endl;
+  cout << "======= end parameters =======\n";
 }
 
 void readCommandLine(int argc, char** argv)
 {
   if(argc==1){
-  cout << "no CL params - exiting.\n"; exit(1) ;
- }
- else{
-  for(int iarg=1; iarg<argc-1; iarg++){
-   if(strcmp(argv[iarg],"-system")==0) collSystem = argv[iarg+1];
-   if(strcmp(argv[iarg],"-params")==0) readParameters(argv[iarg+1]);
-   if(strcmp(argv[iarg],"-ISinput")==0) isInputFile = argv[iarg+1];
-   if(strcmp(argv[iarg],"-outputDir")==0) outputDir = argv[iarg+1];
+    cout << "no CL params - exiting.\n"; exit(1) ;
   }
-  cout << "vhlle: command line parameters are:\n";
-  cout << "collision system:  " << collSystem << endl;
-  cout << "ini.state input:  " << isInputFile << endl;
-  cout << "output directory:  " << outputDir << endl;
- }
+  else{
+    for(int iarg=1; iarg<argc-1; iarg++){
+      if(strcmp(argv[iarg],"-system")==0) collSystem = argv[iarg+1];
+      if(strcmp(argv[iarg],"-params")==0) readParameters(argv[iarg+1]);
+      if(strcmp(argv[iarg],"-ISinput")==0) isInputFile = argv[iarg+1];
+      if(strcmp(argv[iarg],"-outputDir")==0) outputDir = argv[iarg+1];
+    }
+    cout << "vhlle: command line parameters are:\n";
+    cout << "collision system:  " << collSystem << endl;
+    cout << "ini.state input:  " << isInputFile << endl;
+    cout << "output directory:  " << outputDir << endl;
+  }
 }
 
 
@@ -253,7 +272,7 @@ Fluid* expandGrid2x(Hydro* h, EoS* eos, EoS* eosH, TransportCoeff *trcoeff) {
  // creating a new fluid, twice the transverse size of the current one
  Fluid* fnew = new Fluid(eos, eosH, trcoeff, f->getNX(), f->getNY(), f->getNZ(),
    2.0*f->getX(0), 2.0*f->getX(f->getNX()-1), 2.0*f->getY(0), 2.0*f->getY(f->getNY()-1),
-   f->getZ(0), f->getZ(f->getNZ()-1), 2.0*h->getDtau(), f->geteCrit());
+   f->getZ(0), f->getZ(f->getNZ()-1), 2.0*h->getDtau(), f->geteCrit(), cartesian);
  if (vorticityOn) fnew->enableVorticity();
  // filling the new fluid
  for(int ix=0; ix<f->getNX(); ix++)
@@ -277,13 +296,17 @@ int main(int argc, char **argv) {
  TransportCoeff *trcoeff;
  Fluid *f;
  Hydro *h;
+ deque<Particle>* particles = new deque<Particle>();   // dynIC
  time_t start = 0, end;
-
  time(&start);
 
  // read parameters from file
  readCommandLine(argc, argv);
  printParameters();
+
+  if(icModel==10) {
+  tauResize = 100.0;    // do not resize grid in dynIC
+ }
 
  // EoS for hydro evolution
  if (eosType == 0)
@@ -313,14 +336,16 @@ int main(int argc, char **argv) {
    return 0;
  }
 
-
  // transport coefficients
  trcoeff = new TransportCoeff(etaS, zetaS, ah, al, aRho, T0, etaSMin, etaSEpsilonMin, etaSShiftMuB,
   etaSScaleMuB, zetaSPeakEpsilon, zetaSScaleBeta, zetaSSigmaMinus, zetaSSigmaPlus,  eos, etaSparam, zetaSparam);
 
  f = new Fluid(eos, eosH, trcoeff, nx, ny, nz, xmin, xmax, ymin, ymax, etamin,
-               etamax, dtau, eCrit);
+               etamax, dtau, eCrit, cartesian);
  cout << "fluid allocation done\n";
+ double timeInit = 0; // current time, tau or t depending on the coordinate frame
+ double timeInitFO = 0.;  // time to start freezeout
+
  // initial conditions
  if (icModel == 1) { // optical Glauber
   ICGlauber *ic = new ICGlauber(epsilon0, impactPar, tau0);
@@ -361,6 +386,20 @@ int main(int argc, char **argv) {
    ICSuperMC *ic = new ICSuperMC(isInputFile, tau0, collSystem);
    ic->setIC(f, eos);
    delete ic;
+ } else if(icModel==10) { // SMASH dynamical IC
+    if (!cartesian) {
+     std::string dynflu_warning = "IC model = 10: Dynamical Fluidization \n"
+                                 "Cartesian coordinate system must be set. Exiting.\n";
+     std::cout << red << dynflu_warning << reset;
+     exit(1);
+    }
+   IcDynFlu *ic = new IcDynFlu(f, isInputFile.c_str(), gaussian_sigma, particles);
+   ic->setIC(f, eos, particles, timeInit, minParticlesFO, timeInitFO);
+   delete ic;
+ } else if(icModel==11){ // IC for testing purposes
+   ICTest *ic = new ICTest();
+   ic->setIC(f, eos, 1);
+   delete ic;
  } else {
    cout << "icModel = " << icModel << " not implemented\n";
  }
@@ -375,8 +414,16 @@ int main(int argc, char **argv) {
  cout << "Init time = " << diff << " [sec]" << endl;
 
  // hydro init
- h = new Hydro(f, eos, trcoeff, tau0, dtau);
-
+ double ctime;
+ 
+ if(cartesian) {
+  h = new Hydro(f, eos, trcoeff, timeInit, dtau, cartesian);
+  ctime = h->getTime();
+ }
+ else {
+  h = new Hydro(f, eos, trcoeff, tau0, dtau, cartesian);
+  ctime = h->getTau();
+ }
  // Enable vorticity if key is set in the config file
  if (vorticityOn) {
   h -> enableVorticity();
@@ -385,17 +432,19 @@ int main(int argc, char **argv) {
  start = 0;
  time(&start);
  // h->setNSvalues() ; // initialize viscous terms
-
  f->initOutput(outputDir.c_str(), tau0, freezeoutOnly);
- f->outputCorona(tau0, freezeoutExtend);
- if (vorticityOn) f->printDbetaHeader();
+ if(icModel!=10) {
+   f->outputCorona(tau0, freezeoutExtend);
+   if (vorticityOn) f->printDbetaHeader();
+ }
 
  bool resized = false; // flag if the grid has been resized
 
  std::string dir=outputDir.c_str();
- VtkOutput vtk_out=VtkOutput(dir,eos,xmin,ymin,etamin);
+ VtkOutput vtk_out=VtkOutput(dir,eos,xmin,ymin,etamin,cartesian);
+ int nelements = 1;
 
- int nelements = 0;
+ // ############### THE TIMESTEP LOOP ##############
  do {
   // small tau: decrease timestep by making substeps, in order
   // to avoid instabilities in eta direction (signal velocity ~1/tau)
@@ -403,8 +452,9 @@ int main(int argc, char **argv) {
     vtk_out.write(*h,vtk_values);
   }
   int nSubSteps = 1;
+    
   while (dtau / nSubSteps >
-         1.0 * h->getTau() * (etamax - etamin) / (nz - 1)) {
+         1.0 * ctime * (etamax - etamin) / (nz - 1)) {
    nSubSteps *= 2;  // 0.02 in "old" coordinates
   }
   if(nSubSteps>1) {
@@ -417,15 +467,41 @@ int main(int argc, char **argv) {
   } else {
    h->performStep();
   }
-  nelements = f->outputSurface(h->getTau(), freezeoutExtend);
+  
+  if (cartesian) {
+   ctime = h->getTime();
+  }
+  else {
+   ctime = h->getTau();
+  }
+
+  if (icModel == 10) {
+    if (particles->size() > 0) h->addParticles(particles);
+    
+    if ((ctime > timeInitFO) && (nelements>0)) {
+      nelements = f->outputSurface(ctime, freezeoutExtend);
+    } 
+  } else {
+    nelements = f->outputSurface(h->getTau(), freezeoutExtend);
+  }
   if (!freezeoutOnly)
-   f->outputGnuplot(h->getTau());
-  if(h->getTau()>=tauResize and resized==false) {
+   f->outputGnuplot(ctime);
+  
+  if (nelements == 0)
+  {
+    if (icModel == 10)
+    {
+      outputCoronaParticles(particles, outputDir);
+    }
+    break; // otherwise, simply stop the evolution when there is no new surface elements
+  }
+
+  if(ctime>=tauResize and resized==false) {
    cout << "grid resize\n";
    f = expandGrid2x(h, eos, eosH, trcoeff);
    resized = true;
   }
- } while((h->getTau()<tauMax+0.0001) and (nelements>0));
+ } while(ctime<tauMax+0.0001);
 
  end = 0;
  time(&end);
@@ -438,4 +514,5 @@ int main(int argc, char **argv) {
  delete h;
  delete eos;
  delete eosH;
+ delete particles;
 }

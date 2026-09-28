@@ -11,8 +11,8 @@ private:
  double ***T00, ***T0x, ***T0y, ***T0z, ***QB, ***QE, ***QS;
  // auxiliary particle values for reading from file
  double Tau_val, X_val, Y_val, Eta_val, Mt_val, Px_val, Py_val, Rap_val;
- int Id_val, Charge_val, Baryon_val, Strangeness_val;
-  // auxiliary particle arrays
+ int Id_val, Baryon_val, Charge_val, Strangeness_val;
+ // auxiliary particle arrays
  std::vector<double> Tau, X, Y, Eta, Mt, Px, Py, Rap;
  std::vector<int> Id, Charge, Baryon, Strangeness;
 
@@ -75,7 +75,6 @@ private:
 
 public:
  IcPartSMASH(Fluid *f, const char *filename, double _Rgt, double _Rgz, int _smoothingType);
- IcPartSMASH(Fluid *f, const char *filename, double _sNN, double _Rgt_Alpha, double _Rgt_Beta, double _Rgz_Alpha, double _Rgz_Beta, int _smoothingType);
  ~IcPartSMASH();
  void setIC(Fluid *f, EoS *eos); 
  inline double getTau0() { return tau0; }

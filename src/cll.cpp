@@ -4,6 +4,7 @@
 #include <iomanip>
 #include "rmn.h"
 #include "cll.h"
+#include "particle.h"
 
 using namespace std;
 
@@ -18,24 +19,13 @@ double minmod(double a, double b) {
   return a;
 }
 
-// index44: returns an index of pi^{mu nu} mu,nu component in a plain 1D array
-int index44(const int &i, const int &j) {
- if (i > 3 || j > 3 || i < 0 || j < 0) {
-  std::cout << "index44: i j " << i << " " << j << endl;
-  exit(1);
- }
- if (j < i)
-  return (i * (i + 1)) / 2 + j;
- else
-  return (j * (j + 1)) / 2 + i;
-}
-
 Cell::Cell() {
  for (int i = 0; i < 7; i++) {
   Q[i] = 0.;
   Qh[i] = 0.;
   Qprev[i] = 0.;
   flux[i] = 0.;
+  S[i] = 0.;
  }
  viscCorrCut = 1.;
  for (int i = 0; i < 10; i++) {
@@ -253,4 +243,11 @@ void Cell::Dump(double tau) {
       << Qh[6] / tau << endl;
 
  cout << "--------------------------------\n";
+}
+
+void Cell::updateByParticleSource(){
+  for (int i = 0; i < 7; i++) {
+     Q[i] += S[i];
+  }  
+  if (Q[T_] > 0.) setAllM(1.);
 }

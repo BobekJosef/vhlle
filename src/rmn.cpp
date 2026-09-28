@@ -37,6 +37,10 @@ void transformPV(EoS *eos, double Q[7], double &e, double &p, double &nb,
  const double corrf = 0.9999;  // corrected value of M
  // when it brakes the speed of light limit, M>Q_t
  double v, vl = 0., vh = 1., dvold, dv, f, df;
+ for(int i=0; i<7; i++) {
+   if(fabs(Q[i])<1e-100)
+     Q[i] = 0.;
+ }
  if (debugRiemann) {
   cout << "transformPV debug---------------\n";
   cout << setw(14) << Q[0] << setw(14) << Q[1] << setw(14) << Q[2] << setw(14)
@@ -108,9 +112,10 @@ void transformPV(EoS *eos, double Q[7], double &e, double &p, double &nb,
    vh = v;
   else
    vl = v;
-  if (nb != nb)
+  if (nb != nb) {
    cout << "transformCV:nbInf " << i << "  " << e << "  " << nb << "  " << nq
         << "  " << ns << "  " << p << "  " << v << endl;
+  }
   if (debugRiemann)
    cout << "step " << i << "  " << e << "  " << nb << "  " << nq << "  " << ns
         << "  " << p << "  " << vx << "  " << vy << "  " << vz << endl;
@@ -237,10 +242,10 @@ void transformPVBulk(EoS *eos, double Pi, double Q[7], double &e, double &p,
  if (e < 0. || sqrt(vx * vx + vy * vy + vz * vz) > 1.) {
   cout << Q[T_] << "  " << Q[X_] << "  " << Q[Y_] << "  " << Q[Z_] << "  "
        << Q[NB_] << endl;
-  cout << "transformRF::Error\n";
+  cout << "transformRFbulk::Error\n";
  }
  if (!(nb < 0. || nb >= 0.)) {
-  cout << "transformRF::Error nb=#ind\n";
+  cout << "transformRFbulk::Error nb=#ind\n";
   cout << "Q [7]: " << Q[0] << " " << Q[1] << " " << Q[2] << " " << Q[3] << " "
        << Q[4] << " " << Q[5] << " " << Q[6] << endl;
   cout << "e vx vy vz nb nq ns: " << e << " " << vx << " " << vy << " " << vz

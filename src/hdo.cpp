@@ -20,12 +20,14 @@
 #include <iomanip>
 #include <algorithm>
 #include <unistd.h>
+#include <memory>
 #include "hdo.h"
 #include "inc.h"
 #include "rmn.h"
 #include "fld.h"
 #include "eos.h"
 #include "trancoeff.h"
+#include "particle.h"
 
 using namespace std;
 
@@ -48,12 +50,19 @@ double sign(double x) {
 // else: use 1st order finite difference update
 
 Hydro::Hydro(Fluid *_f, EoS *_eos, TransportCoeff *_trcoeff, double _t0,
-             double _dt) {
+             double _dt, bool _cartesian) {
  eos = _eos;
  trcoeff = _trcoeff;
  f = _f;
  dt = _dt;
- tau = _t0;
+ cartesian = _cartesian;
+ if (cartesian) {
+  t = _t0;
+  tau = 1.0;
+ }
+ else {
+  tau = _t0;
+ }
 }
 
 Hydro::~Hydro() {}
@@ -77,6 +86,8 @@ void Hydro::setDtau(double deltaTau) {
 void Hydro::hlle_flux(Cell *left, Cell *right, int direction, int mode) {
  // for all variables, suffix "l" = left state, "r" = right state
  // with respect to the cell boundary
+ if(left->getQt()==0. && right->getQt()==0.)
+   return;
  double el, er, pl, pr, nbl, nql, nsl, nbr, nqr, nsr, vxl, vxr, vyl, vyr, vzl,
      vzr, bl = 0., br = 0., csb, vb, El, Er, dx = 0.;
  double Ftl = 0., Fxl = 0., Fyl = 0., Fzl = 0., Fbl = 0., Fql = 0., Fsl = 0.,
@@ -84,7 +95,7 @@ void Hydro::hlle_flux(Cell *left, Cell *right, int direction, int mode) {
  double U1l, U2l, U3l, U4l, Ubl, Uql, Usl, U1r, U2r, U3r, U4r, Ubr, Uqr, Usr;
  double flux[7];
  const double dta = mode == 0 ? dt / 2. : dt;
- double tauFactor;  // fluxes are also multiplied by tau
+ double tauFactor = 1.0;  // fluxes are also multiplied by tau, 1 for Cartesian
  if (mode == PREDICT) {
   // get primitive quantities from Q_{i+} at previous timestep
   left->getPrimVarRight(eos, tau, el, pl, nbl, nql, nsl, vxl, vyl, vzl,
@@ -94,7 +105,9 @@ void Hydro::hlle_flux(Cell *left, Cell *right, int direction, int mode) {
                         direction);
   El = (el + pl) / (1 - vxl * vxl - vyl * vyl - vzl * vzl);
   Er = (er + pr) / (1 - vxr * vxr - vyr * vyr - vzr * vzr);
-  tauFactor = tau + 0.25 * dt;
+  if (!cartesian) {
+   tauFactor = tau + 0.25 * dt;
+  }
  } else {
   // use half-step updated Q's for corrector step
   left->getPrimVarHRight(eos, tau, el, pl, nbl, nql, nsl, vxl, vyl, vzl,
@@ -103,7 +116,9 @@ void Hydro::hlle_flux(Cell *left, Cell *right, int direction, int mode) {
                          direction);
   El = (el + pl) / (1 - vxl * vxl - vyl * vyl - vzl * vzl);
   Er = (er + pr) / (1 - vxr * vxr - vyr * vyr - vzr * vzr);
-  tauFactor = tau + 0.5 * dt;
+  if (!cartesian) {
+   tauFactor = tau + 0.5 * dt;
+  }
  }
 
  if (el < 0.) {
@@ -306,16 +321,22 @@ void Hydro::hlle_flux(Cell *left, Cell *right, int direction, int mode) {
 
 void Hydro::source(double tau1, double x, double y, double z, double Q[7],
                    double S[7]) {
- double _Q[7], e, p, nb, nq, ns, vx, vy, vz;
- for (int i = 0; i < 7; i++) _Q[i] = Q[i] / tau1;  // no tau factor in  _Q
- transformPV(eos, _Q, e, p, nb, nq, ns, vx, vy, vz);
- S[T_] = -_Q[T_] * vz * vz - p * (1. + vz * vz);
- S[X_] = 0.;
- S[Y_] = 0.;
- S[Z_] = -_Q[Z_];
- S[NB_] = 0.;
- S[NQ_] = 0.;
- S[NS_] = 0.;
+ if (cartesian) {
+  // geometrical source term is zero in Cartesian frame
+  for (int i = 0; i < 7; i++) S[i] = 0.0;
+ }
+ else {
+  double _Q[7], e, p, nb, nq, ns, vx, vy, vz;
+  for (int i = 0; i < 7; i++) _Q[i] = Q[i] / tau1;  // no tau factor in  _Q
+  transformPV(eos, _Q, e, p, nb, nq, ns, vx, vy, vz);
+  S[T_] = -_Q[T_] * vz * vz - p * (1. + vz * vz);
+  S[X_] = 0.;
+  S[Y_] = 0.;
+  S[Z_] = -_Q[Z_];
+  S[NB_] = 0.;
+  S[NQ_] = 0.;
+  S[NS_] = 0.;
+ }
 }
 
 void Hydro::source_step(int ix, int iy, int iz, int mode) {
@@ -334,10 +355,11 @@ void Hydro::source_step(int ix, int iy, int iz, int mode) {
 
  if (mode == PREDICT) {
   c->getQ(Q);
-  tau1 = tau;
+  tau1 = (cartesian) ? t : tau;
  } else {
   c->getQh(Q);
-  tau1 = tau + 0.5 * dt;
+  tau1 = (cartesian) ? t : tau;
+  tau1 = tau1 + 0.5 * dt;
  }
  source(tau1, x, y, z, Q, k);
  for (int i = 0; i < 7; i++) k[i] *= _dt;
@@ -357,21 +379,25 @@ void Hydro::visc_source_step(int ix, int iy, int iz) {
  double uuu[4];
  double k[7];
 
- Cell *c = f->getCell(ix, iy, iz);
+ // there is no geometric viscous source term in Cartesian frame
+ if (!cartesian) {
+  Cell *c = f->getCell(ix, iy, iz);
 
- c->getPrimVarHCenter(eos, tau - dt / 2., e, p, nb, nq, ns, vx, vy, vz);
- if (e <= 0.) return;
- uuu[0] = 1. / sqrt(1. - vx * vx - vy * vy - vz * vz);
- uuu[1] = uuu[0] * vx;
- uuu[2] = uuu[0] * vy;
- uuu[3] = uuu[0] * vz;
+  c->getPrimVarHCenter(eos, tau - dt / 2., e, p, nb, nq, ns, vx, vy, vz);  // TODO Cartesian
+  if (e <= 0.) return;
+  uuu[0] = 1. / sqrt(1. - vx * vx - vy * vy - vz * vz);
+  uuu[1] = uuu[0] * vx;
+  uuu[2] = uuu[0] * vy;
+  uuu[3] = uuu[0] * vz;
 
- k[T_] = -c->getpiH(3, 3) + c->getPiH() * (-1.0 - uuu[3] * uuu[3]);
- k[X_] = 0.;
- k[Y_] = 0.;
- k[Z_] = -(c->getpiH(0, 3) + c->getPiH() * uuu[0] * uuu[3]);
- for (int i = 0; i < 4; i++) k[i] *= dt;
- c->addFlux(k[T_], k[X_], k[Y_], k[Z_], 0., 0., 0.);
+  k[T_] = -c->getpiH(3, 3) + c->getPiH() * (-1.0 - uuu[3] * uuu[3]);
+  k[X_] = 0.;
+  k[Y_] = 0.;
+  k[Z_] = -(c->getpiH(0, 3) + c->getPiH() * uuu[0] * uuu[3]);
+  for (int i = 0; i < 4; i++) k[i] *= dt;
+  c->addFlux(k[T_], k[X_], k[Y_], k[Z_], 0., 0., 0.);
+ }
+ 
 }
 
 // for the procedure below, the following approximations are used:
@@ -400,10 +426,24 @@ void Hydro::NSquant(int ix, int iy, int iz, double pi[4][4], double &Pi,
      f->getCell(ix, iy + 1, iz)->getMaxM() <= 0.9 ||
      f->getCell(ix - 1, iy, iz)->getMaxM() <= 0.9 ||
      f->getCell(ix, iy - 1, iz)->getMaxM() <= 0.9 ||
+     f->getCell(ix, iy, iz + 1)->getMaxM() <= 0.9 ||
+     f->getCell(ix, iy, iz - 1)->getMaxM() <= 0.9 ||
+
      f->getCell(ix + 1, iy + 1, iz)->getMaxM() <= 0.9 ||
      f->getCell(ix + 1, iy - 1, iz)->getMaxM() <= 0.9 ||
      f->getCell(ix - 1, iy + 1, iz)->getMaxM() <= 0.9 ||
-     f->getCell(ix - 1, iy - 1, iz)->getMaxM() <= 0.9) {
+     f->getCell(ix - 1, iy - 1, iz)->getMaxM() <= 0.9 ||
+     
+     f->getCell(ix + 1, iy, iz + 1)->getMaxM() <= 0.9 ||
+     f->getCell(ix + 1, iy, iz - 1)->getMaxM() <= 0.9 ||
+     f->getCell(ix - 1, iy, iz + 1)->getMaxM() <= 0.9 ||
+     f->getCell(ix - 1, iy, iz - 1)->getMaxM() <= 0.9 ||
+     
+     f->getCell(ix, iy + 1, iz + 1)->getMaxM() <= 0.9 ||
+     f->getCell(ix, iy + 1, iz - 1)->getMaxM() <= 0.9 ||
+     f->getCell(ix, iy - 1, iz + 1)->getMaxM() <= 0.9 ||
+     f->getCell(ix, iy - 1, iz - 1)->getMaxM() <= 0.9) {
+  
   for (int i = 0; i < 4; i++)
    for (int j = 0; j < 4; j++) {
     pi[i][j] = 0.;
@@ -416,15 +456,22 @@ void Hydro::NSquant(int ix, int iy, int iz, double pi[4][4], double &Pi,
  // mu=first index, nu=second index
  // centered differences with respect to the values at (it+1/2, ix, iy, iz)
  // d_tau u^\mu
- c->getPrimVarPrev(eos, tau - dt, e0, p, nb, nq, ns, vx0, vy0, vz0);
+ if (cartesian) {
+  c->getPrimVarPrev(eos, 1.0, e0, p, nb, nq, ns, vx0, vy0, vz0);
+  c->getPrimVar(eos, 1.0, e1, p, nb, nq, ns, vx1, vy1, vz1);
+  c->getPrimVarHCenter(eos, 1.0, e1, p, nb, nq, ns, vxH, vyH, vzH);  
+ }
+ else {
+  c->getPrimVarPrev(eos, tau - dt, e0, p, nb, nq, ns, vx0, vy0, vz0);
+  c->getPrimVar(eos, tau, e1, p, nb, nq, ns, vx1, vy1, vz1);
+  c->getPrimVarHCenter(eos, tau - 0.5 * dt, e1, p, nb, nq, ns, vxH, vyH, vzH);
+ }
+ double tauPlusHalf = (cartesian) ? 1.0 : (tau + 0.5 * dt);
+ double tauMinusHalf = (cartesian) ? 1.0 : (tau - 0.5 * dt);
  if (vorticityOn) {
   eos->eos(e0, nb, nq, ns, T0, mub, muq, mus, p);
+  eos->eos(e1, nb, nq, ns, T1, mub, muq, mus, p);
  }
- c->getPrimVar(eos, tau, e1, p, nb, nq, ns, vx1, vy1, vz1);
- if (vorticityOn) {
-   eos->eos(e1, nb, nq, ns, T1, mub, muq, mus, p);
- }
- c->getPrimVarHCenter(eos, tau - 0.5 * dt, e1, p, nb, nq, ns, vxH, vyH, vzH);
  //############## get transport coefficients
  double etaS, zetaS;
  double s = eos->s(e1, nb, nq, ns);  // entropy density in the current cell
@@ -578,36 +625,38 @@ void Hydro::NSquant(int ix, int iy, int iz, double pi[4][4], double &Pi,
   ux1 = ut1 * vx1;
   uy1 = ut1 * vy1;
   uz1 = ut1 * vz1;
-  dmu[3][0] = 0.25 * (ut1 * ut1 - ut0 * ut0) / uuu[0] / dz / (tau + 0.5 * dt);
-  dmu[3][1] = 0.25 * (ux1 * ux1 - ux0 * ux0) / uuu[1] / dz / (tau + 0.5 * dt);
-  dmu[3][2] = 0.25 * (uy1 * uy1 - uy0 * uy0) / uuu[2] / dz / (tau + 0.5 * dt);
-  dmu[3][3] = 0.25 * (uz1 * uz1 - uz0 * uz0) / uuu[3] / dz / (tau + 0.5 * dt);
+  dmu[3][0] = 0.25 * (ut1 * ut1 - ut0 * ut0) / uuu[0] / dz / tauPlusHalf;
+  dmu[3][1] = 0.25 * (ux1 * ux1 - ux0 * ux0) / uuu[1] / dz / tauPlusHalf;
+  dmu[3][2] = 0.25 * (uy1 * uy1 - uy0 * uy0) / uuu[2] / dz / tauPlusHalf;
+  dmu[3][3] = 0.25 * (uz1 * uz1 - uz0 * uz0) / uuu[3] / dz / tauPlusHalf;
   if (vorticityOn) {
-    (*dbeta)[3][0] = 0.5 * (ut1 / T1 - ut0 / T0) / (dz * (tau + 0.5 * dt));
-    (*dbeta)[3][1] = 0.5 * (ux1 / T1 - ux0 / T0) / (dz * (tau + 0.5 * dt));
-    (*dbeta)[3][2] = 0.5 * (uy1 / T1 - uy0 / T0) / (dz * (tau + 0.5 * dt));
-    (*dbeta)[3][3] = 0.5 * (uz1 / T1 - uz0 / T0) / (dz * (tau + 0.5 * dt));
+    (*dbeta)[3][0] = 0.5 * (ut1 / T1 - ut0 / T0) / (dz * tauPlusHalf);
+    (*dbeta)[3][1] = 0.5 * (ux1 / T1 - ux0 / T0) / (dz * tauPlusHalf);
+    (*dbeta)[3][2] = 0.5 * (uy1 / T1 - uy0 / T0) / (dz * tauPlusHalf);
+    (*dbeta)[3][3] = 0.5 * (uz1 / T1 - uz0 / T0) / (dz * tauPlusHalf);
     if(e1 <= 0. || e0 <= 0. || T1<=0. || T0<=0.){
       (*dbeta)[3][0] = (*dbeta)[3][1] = (*dbeta)[3][2] = (*dbeta)[3][3] = 0.;
  }
   }
   if (fabs(0.5 * (ut1 + ut0) / uuu[0]) > UDIFF)
-   dmu[3][0] = 0.5 * (ut1 - ut0) / dz / (tau + 0.5 * dt);
+   dmu[3][0] = 0.5 * (ut1 - ut0) / dz / tauPlusHalf;
   if (fabs(uuu[1]) < VMIN || fabs(0.5 * (ux1 + ux0) / uuu[1]) > UDIFF)
-   dmu[3][1] = 0.5 * (ux1 - ux0) / dz / (tau + 0.5 * dt);
+   dmu[3][1] = 0.5 * (ux1 - ux0) / dz / tauPlusHalf;
   if (fabs(uuu[2]) < VMIN || fabs(0.5 * (uy1 + uy0) / uuu[2]) > UDIFF)
-   dmu[3][2] = 0.5 * (uy1 - uy0) / dz / (tau + 0.5 * dt);
+   dmu[3][2] = 0.5 * (uy1 - uy0) / dz / tauPlusHalf;
   if (fabs(uuu[3]) < VMIN || fabs(0.5 * (uz1 + uz0) / uuu[3]) > UDIFF)
-   dmu[3][3] = 0.5 * (uz1 - uz0) / dz / (tau + 0.5 * dt);
+   dmu[3][3] = 0.5 * (uz1 - uz0) / dz / tauPlusHalf;
  } else {  // matter-vacuum
   dmu[3][0] = dmu[3][1] = dmu[3][2] = dmu[3][3] = 0.;
  }
  // additional terms from Christoffel symbols :)
- dmu[3][0] += uuu[3] / (tau - 0.5 * dt);
- dmu[3][3] += uuu[0] / (tau - 0.5 * dt);
- if(vorticityOn && T>0.){
-  (*dbeta)[3][0] += uuu[3] / (T * (tau - 0.5 * dt));
-  (*dbeta)[3][3] += uuu[0] / (T * (tau - 0.5 * dt));
+ if (!cartesian) {
+  dmu[3][0] += uuu[3] / tauMinusHalf;
+  dmu[3][3] += uuu[0] / tauMinusHalf;
+  if(vorticityOn && T>0.){
+   (*dbeta)[3][0] += uuu[3] / (T * tauMinusHalf);
+   (*dbeta)[3][3] += uuu[0] / (T * tauMinusHalf);
+  }
  }
  // calculation of Z[mu][nu][lambda][rho]
  for (int i = 0; i < 4; i++)
@@ -680,19 +729,22 @@ void Hydro::setNSvalues() {
 }
 
 void Hydro::ISformal() {
- double e, p, nb, nq, ns, vx, vy, vz, T, mub, muq, mus;
- double piNS[4][4], sigNS[4][4], PiNS, dmu[4][4], du, pi[4][4], piH[4][4], Pi, PiH;
- std::unique_ptr<Matrix2D> dbeta = vorticityOn
-    ? std::make_unique<Matrix2D>(Matrix2D(4, std::vector<double>(4, 0.0)))
-    : nullptr;
  const double gmumu[4] = {1., -1., -1., -1.};
-
+ double tauMinusHalf = (cartesian) ? 1.0 : (tau - 0.5 * dt);
+ double tauMinusDt = (cartesian) ? 1.0 : (tau - dt);
+ 
  // loop #1 (relaxation+source terms)
+ #pragma omp parallel for collapse(2) schedule(dynamic, 2)
  for (int ix = 0; ix < f->getNX(); ix++)
-  for (int iy = 0; iy < f->getNY(); iy++)
+  for (int iy = 0; iy < f->getNY(); iy++) {
+   double e, p, nb, nq, ns, vx, vy, vz, T, mub, muq, mus;
+   double piNS[4][4], sigNS[4][4], PiNS, dmu[4][4], du;
+   std::unique_ptr<Matrix2D> dbeta = vorticityOn
+      ? std::make_unique<Matrix2D>(Matrix2D(4, std::vector<double>(4, 0.0)))
+      : nullptr;
    for (int iz = 0; iz < f->getNZ(); iz++) {
     Cell *c = f->getCell(ix, iy, iz);
-    c->getPrimVarHCenter(eos, tau - dt / 2., e, p, nb, nq, ns, vx, vy,
+    c->getPrimVarPrev(eos, tauMinusDt, e, p, nb, nq, ns, vx, vy,
                          vz);  // instead of getPrimVar()
     if (e <= 0.) {             // empty cell?
      for (int i = 0; i < 4; i++)
@@ -716,9 +768,15 @@ void Hydro::ISformal() {
      // source term  + tau*delta_Q_i/delta_tau
      double flux[4];
      for (int i = 0; i < 4; i++)
-      flux[i] = (tau - dt) * (c->getpi(0, i) + c->getPi() * u[0] * u[i]);
-     flux[0] += -(tau - dt) * c->getPi();
+      flux[i] = tauMinusDt * (c->getpi(0, i) + c->getPi() * u[0] * u[i]);
+     flux[0] += -tauMinusDt * c->getPi();
      c->addFlux(flux[0], flux[1], flux[2], flux[3], 0., 0., 0.);
+     c->getPrimVarHCenter(eos, tauMinusHalf, e, p, nb, nq, ns, vx, vy, vz);
+     gamma = 1.0 / sqrt(1.0 - vx * vx - vy * vy - vz * vz);
+     u[0] = gamma;
+     u[1] = u[0] * vx;
+     u[2] = u[0] * vy;
+     u[3] = u[0] * vz;
      // now calculating viscous terms in NS limit
      NSquant(ix, iy, iz, piNS, PiNS, dmu, dbeta, du);
      if (vorticityOn) {
@@ -774,18 +832,21 @@ void Hydro::ISformal() {
     else
      c->setPiH0(PiNS);
 #endif
-     // sources from Christoffel symbols from \dot pi_munu
-     double tau1 = tau - dt * 0.75;
-     c->addpiH0(0, 0,
+     // sources from Christoffel symbols from \dot pi_munu - only in tau-eta coordinate frame
+     if (!cartesian) {
+      double tau1 = tau - dt * 0.75;
+      c->addpiH0(0, 0,
                 -2. * vz * c->getpi(0, 3) / tau1 * dt / 2.);  // *gamma/gamma
-     c->addpiH0(3, 3, -(2. * vz / tau1 * c->getpi(0, 3)) * dt / 2.);
-     c->addpiH0(
+      c->addpiH0(3, 3, -(2. * vz / tau1 * c->getpi(0, 3)) * dt / 2.);
+      c->addpiH0(
          3, 0,
          -(vz / tau1 * c->getpi(0, 0) + vz / tau1 * c->getpi(3, 3)) * dt / 2.);
-     c->addpiH0(1, 0, -vz / tau1 * c->getpi(1, 3) * dt / 2.);
-     c->addpiH0(2, 0, -vz / tau1 * c->getpi(2, 3) * dt / 2.);
-     c->addpiH0(3, 1, -(vz / tau1 * c->getpi(0, 1)) * dt / 2.);
-     c->addpiH0(3, 2, -(vz / tau1 * c->getpi(0, 2)) * dt / 2.);
+      c->addpiH0(1, 0, -vz / tau1 * c->getpi(1, 3) * dt / 2.);
+      c->addpiH0(2, 0, -vz / tau1 * c->getpi(2, 3) * dt / 2.);
+      c->addpiH0(3, 1, -(vz / tau1 * c->getpi(0, 1)) * dt / 2.);
+      c->addpiH0(3, 2, -(vz / tau1 * c->getpi(0, 2)) * dt / 2.);
+     }
+     
      // source from full IS equations (see  draft for the description)
      for (int i = 0; i < 4; i++)
       for (int j = 0; j <= i; j++) {
@@ -830,16 +891,19 @@ void Hydro::ISformal() {
     else
      c->setPi0(PiNS);
 #endif
-     tau1 = tau - dt * 0.5;
-     c->addpi0(0, 0, -2. * vz / tau1 * c->getpiH0(0, 3) * dt);  // *gamma/gamma
-     c->addpi0(3, 3, -(2. * vz / tau1 * c->getpiH0(0, 3)) * dt);
-     c->addpi0(
+     if (!cartesian) {
+      double tau1 = tau - dt * 0.5;
+      c->addpi0(0, 0, -2. * vz / tau1 * c->getpiH0(0, 3) * dt);  // *gamma/gamma
+      c->addpi0(3, 3, -(2. * vz / tau1 * c->getpiH0(0, 3)) * dt);
+      c->addpi0(
          3, 0,
          -(vz / tau1 * c->getpiH0(0, 0) + vz / tau1 * c->getpiH0(3, 3)) * dt);
-     c->addpi0(1, 0, -vz / tau1 * c->getpiH0(1, 3) * dt);
-     c->addpi0(2, 0, -vz / tau1 * c->getpiH0(2, 3) * dt);
-     c->addpi0(3, 1, -(vz / tau1 * c->getpiH0(0, 1)) * dt);
-     c->addpi0(3, 2, -(vz / tau1 * c->getpiH0(0, 2)) * dt);
+      c->addpi0(1, 0, -vz / tau1 * c->getpiH0(1, 3) * dt);
+      c->addpi0(2, 0, -vz / tau1 * c->getpiH0(2, 3) * dt);
+      c->addpi0(3, 1, -(vz / tau1 * c->getpiH0(0, 1)) * dt);
+      c->addpi0(3, 2, -(vz / tau1 * c->getpiH0(0, 2)) * dt);
+     }
+     
      // source from full IS equations (see draft for the description)
      for (int i = 0; i < 4; i++)
       for (int j = 0; j <= i; j++) {
@@ -861,22 +925,26 @@ void Hydro::ISformal() {
      }
      c->addPi0(-delPiPi * c->getPiH0() * du / gamma * dt);
     }  // end non-empty cell
-   }   // end loop #1
+   }   // end iz
+  }    // end loop #1
 
  // 3) -- advection ---
+ #pragma omp parallel for collapse(2) schedule(dynamic, 2)
  for (int ix = 0; ix < f->getNX(); ix++)
-  for (int iy = 0; iy < f->getNY(); iy++)
+  for (int iy = 0; iy < f->getNY(); iy++) {
+   double e, p, nb, nq, ns, vx, vy, vz;
+   double pi[4][4], piH[4][4], Pi, PiH;
    for (int iz = 0; iz < f->getNZ(); iz++) {
     Cell *c = f->getCell(ix, iy, iz);
-    c->getPrimVarHCenter(eos, tau - 0.5 * dt, e, p, nb, nq, ns, vx, vy,
+    c->getPrimVarHCenter(eos, tauMinusHalf, e, p, nb, nq, ns, vx, vy,
                          vz);  // getPrimVar() before
     if (e <= 0.) continue;
     double xm = -vx * dt / f->getDx();
     double ym = -vy * dt / f->getDy();
-    double zm = -vz * dt / f->getDz() / (tau - 0.5 * dt);
+    double zm = -vz * dt / f->getDz() / tauMinusHalf;
     double xmH = -vx * dt / f->getDx() / 2.0;
     double ymH = -vy * dt / f->getDy() / 2.0;
-    double zmH = -vz * dt / f->getDz() / (tau - 0.5 * dt) / 2.0;
+    double zmH = -vz * dt / f->getDz() / tauMinusHalf / 2.0;
     double wx[2] = {(1. - fabs(xm)), fabs(xm)};
     double wy[2] = {(1. - fabs(ym)), fabs(ym)};
     double wz[2] = {(1. - fabs(zm)), fabs(zm)};
@@ -959,7 +1027,8 @@ void Hydro::ISformal() {
      flux[i] = -tau * (c->getpi(0, i) + c->getPi() * u[0] * u[i]);
     flux[0] += tau * c->getPi();
     c->addFlux(flux[0], flux[1], flux[2], flux[3], 0., 0., 0.);
-   }  // advection loop (all cells)
+   }   // end iz loop
+  }    // advection loop (all cells)
 }
 
 // this procedure explicitly uses T_==0, X_==1, Y_==2, Z_==3
@@ -967,6 +1036,8 @@ void Hydro::visc_flux(Cell *left, Cell *right, int direction) {
  double flux[4];
  int ind2 = 0;
  double dxa = 0.;
+ double tauMinusHalf = (cartesian) ? 1.0 : (tau - 0.5 * dt);
+ double tauPlusHalf = (cartesian) ? 1.0 : (tau + 0.5 * dt);
  // exit if noth cells are not full with matter
  if (left->getM(direction) < 1. && right->getM(direction) < 1.) return;
 
@@ -975,13 +1046,13 @@ void Hydro::visc_flux(Cell *left, Cell *right, int direction) {
  else if (direction == Y_)
   dxa = f->getDy();
  else if (direction == Z_)
-  dxa = f->getDz() * (tau + 0.5 * dt);
+  dxa = f->getDz() * tauPlusHalf;
  double e, p, nb, nq, ns, vxl, vyl, vzl, vxr, vyr, vzr;
  // we need to know the velocities at both cell centers at (n+1/2) in order to
  // interpolate to
  // get the value at the interface
- left->getPrimVarHCenter(eos, tau - dt / 2., e, p, nb, nq, ns, vxl, vyl, vzl);
- right->getPrimVarHCenter(eos, tau - dt / 2., e, p, nb, nq, ns, vxr, vyr, vzr);
+ left->getPrimVarHCenter(eos, tauMinusHalf, e, p, nb, nq, ns, vxl, vyl, vzl);
+ right->getPrimVarHCenter(eos, tauMinusHalf, e, p, nb, nq, ns, vxr, vyr, vzr);
  vxl = 0.5 * (vxl + vxr);
  vyl = 0.5 * (vyl + vyr);
  vzl = 0.5 * (vzl + vzr);
@@ -1008,7 +1079,7 @@ void Hydro::visc_flux(Cell *left, Cell *right, int direction) {
   flux[ind1] +=
       0.5 * (left->getPiH() + right->getPiH()) * uuu[ind1] * uuu[ind2];
  }
- for (int i = 0; i < 4; i++) flux[i] = flux[i] * (tau - 0.5 * dt) * dt / dxa;
+ for (int i = 0; i < 4; i++) flux[i] = flux[i] * tauMinusHalf * dt / dxa;
  left->addFlux(-flux[T_], -flux[X_], -flux[Y_], -flux[Z_], 0., 0., 0.);
  right->addFlux(flux[T_], flux[X_], flux[Y_], flux[Z_], 0., 0., 0.);
 }
@@ -1018,9 +1089,16 @@ void Hydro::performStep(void) {
 
  f->updateM(tau, dt);
 
+ // OpenMP note: hlle_flux()/visc_flux() call addFlux() on BOTH cells adjacent
+ // to an interface, so the sweep direction itself must stay serial within a
+ // thread.  Each sweep is therefore parallelised over the two TRANSVERSE
+ // indices only: a thread then owns a complete pencil of cells and no cell is
+ // ever touched by two threads.  No atomics or reductions are needed.
+
  tau_z = dt / 2. / log(1 + dt / 2. / tau);
 
  //-----PREDICTOR-ideal
+ #pragma omp parallel for collapse(2) schedule(dynamic, 2)
  for (int iy = 0; iy < f->getNY(); iy++)
   for (int iz = 0; iz < f->getNZ(); iz++)
    for (int ix = 0; ix < f->getNX(); ix++) {
@@ -1029,6 +1107,7 @@ void Hydro::performStep(void) {
     c->clearFlux();
    }
  // X dir
+ #pragma omp parallel for collapse(2) schedule(dynamic, 2)
  for (int iy = 0; iy < f->getNY(); iy++)
   for (int iz = 0; iz < f->getNZ(); iz++)
    for (int ix = 0; ix < f->getNX() - 1; ix++) {
@@ -1036,6 +1115,7 @@ void Hydro::performStep(void) {
    }
  //	cout << "predictor X done\n" ;
  // Y dir
+ #pragma omp parallel for collapse(2) schedule(dynamic, 2)
  for (int iz = 0; iz < f->getNZ(); iz++)
   for (int ix = 0; ix < f->getNX(); ix++)
    for (int iy = 0; iy < f->getNY() - 1; iy++) {
@@ -1043,6 +1123,7 @@ void Hydro::performStep(void) {
    }
  //	cout << "predictor Y done\n" ;
  // Z dir
+ #pragma omp parallel for collapse(2) schedule(dynamic, 2)
  for (int ix = 0; ix < f->getNX(); ix++)
   for (int iy = 0; iy < f->getNY(); iy++)
    for (int iz = 0; iz < f->getNZ() - 1; iz++) {
@@ -1050,6 +1131,7 @@ void Hydro::performStep(void) {
    }
  //	cout << "predictor Z done\n" ;
 
+ #pragma omp parallel for collapse(2) schedule(dynamic, 2)
  for (int iy = 0; iy < f->getNY(); iy++)
   for (int iz = 0; iz < f->getNZ(); iz++)
    for (int ix = 0; ix < f->getNX(); ix++) {
@@ -1063,6 +1145,7 @@ void Hydro::performStep(void) {
 
  tau_z = dt / log(1 + dt / tau);
  // X dir
+ #pragma omp parallel for collapse(2) schedule(dynamic, 2)
  for (int iy = 0; iy < f->getNY(); iy++)
   for (int iz = 0; iz < f->getNZ(); iz++)
    for (int ix = 0; ix < f->getNX() - 1; ix++) {
@@ -1070,6 +1153,7 @@ void Hydro::performStep(void) {
    }
  //	cout << "corrector X done\n" ;
  // Y dir
+ #pragma omp parallel for collapse(2) schedule(dynamic, 2)
  for (int iz = 0; iz < f->getNZ(); iz++)
   for (int ix = 0; ix < f->getNX(); ix++)
    for (int iy = 0; iy < f->getNY() - 1; iy++) {
@@ -1077,6 +1161,7 @@ void Hydro::performStep(void) {
    }
  //	cout << "corrector Y done\n" ;
  // Z dir
+ #pragma omp parallel for collapse(2) schedule(dynamic, 2)
  for (int ix = 0; ix < f->getNX(); ix++)
   for (int iy = 0; iy < f->getNY(); iy++)
    for (int iz = 0; iz < f->getNZ() - 1; iz++) {
@@ -1084,6 +1169,7 @@ void Hydro::performStep(void) {
    }
  //	cout << "corrector Z done\n" ;
 
+ #pragma omp parallel for collapse(2) schedule(dynamic, 2)
  for (int iy = 0; iy < f->getNY(); iy++)
   for (int iz = 0; iz < f->getNZ(); iz++)
    for (int ix = 0; ix < f->getNX(); ix++) {
@@ -1092,7 +1178,13 @@ void Hydro::performStep(void) {
     c->updateByFlux();
     c->clearFlux();
    }
- tau += dt;
+ if (cartesian) {
+  t += dt;
+ }
+ else {
+  tau += dt;
+ }
+ 
  f->correctImagCells();
 
  //===== viscous part ======
@@ -1100,6 +1192,7 @@ void Hydro::performStep(void) {
   ISformal();  // evolution of viscous quantities according to IS equations
 
   // X dir
+ #pragma omp parallel for collapse(2) schedule(dynamic, 2)
   for (int iy = 0; iy < f->getNY(); iy++)
    for (int iz = 0; iz < f->getNZ(); iz++)
     for (int ix = 0; ix < f->getNX() - 1; ix++) {
@@ -1107,6 +1200,7 @@ void Hydro::performStep(void) {
     }
   //	cout << "visc_flux X done\n" ;
   // Y dir
+ #pragma omp parallel for collapse(2) schedule(dynamic, 2)
   for (int iz = 0; iz < f->getNZ(); iz++)
    for (int ix = 0; ix < f->getNX(); ix++)
     for (int iy = 0; iy < f->getNY() - 1; iy++) {
@@ -1114,12 +1208,14 @@ void Hydro::performStep(void) {
     }
   //	cout << "visc_flux Y done\n" ;
   // Z dir
+ #pragma omp parallel for collapse(2) schedule(dynamic, 2)
   for (int ix = 0; ix < f->getNX(); ix++)
    for (int iy = 0; iy < f->getNY(); iy++)
     for (int iz = 0; iz < f->getNZ() - 1; iz++) {
      visc_flux(f->getCell(ix, iy, iz), f->getCell(ix, iy, iz + 1), Z_);
     }
 
+ #pragma omp parallel for collapse(2) schedule(dynamic, 2)
   for (int iy = 0; iy < f->getNY(); iy++)
    for (int iz = 0; iz < f->getNZ(); iz++)
     for (int ix = 0; ix < f->getNX(); ix++) {
@@ -1131,4 +1227,29 @@ void Hydro::performStep(void) {
  }
  //==== finishing work ====
  f->correctImagCellsFull();
+}
+
+void Hydro::addParticles(deque<Particle>* particles) {
+ //==== particles coming in ====
+ double particle_t = particles->front().getT();
+ // a quick fix for the code to compile in tau-eta but this fn is not intended to run in tau-eta
+ double current_t = (cartesian) ? t : tau;
+ while (particle_t < current_t) {
+   if (particles->size() > 0) {
+    Particle particleToInject = particles->front();
+    //cout << "particle at t, e:\n";
+    //cout << particleToInject.getT() << " " << particleToInject.getE() << endl;
+    f->addParticle(particleToInject);
+    particles->pop_front();
+    //cout << "particles in queue: " << particles->size() << endl;
+    if (particles->size() > 0) particle_t = particles->front().getT();
+    else particle_t = 1000.;
+   } 
+ }
+ for (int ix = 0; ix < f->getNX(); ix++)
+  for (int iy = 0; iy < f->getNY(); iy++)
+   for (int iz = 0; iz < f->getNZ(); iz++) {
+    f->getCell(ix, iy, iz)->updateByParticleSource();
+    f->getCell(ix, iy, iz)->clearParticleSource();
+   } 
 }
