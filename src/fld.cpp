@@ -23,6 +23,7 @@
 #include <memory>
 #include <cstdio>
 #include <filesystem>
+#include <initializer_list>
 #include <stdexcept>
 #include "inc.h"
 #include <array>
@@ -182,6 +183,18 @@ void Fluid::initOutput(const char *dir, double tau0, bool hsOnly) {
   //################################################################
   outputGnuplot(tau0);
   output::faniz << "#  tau  <<v_T>>  e_p  e'_p  (to compare with SongHeinz)\n";
+ }
+}
+
+void Fluid::closeOutput() {
+ // closes all output streams, so that a following initOutput (next hydro
+ // in the same process) can open them again
+ for (ofstream *f : {&output::fkw, &output::fkw_dim, &output::fxvisc, &output::fyvisc,
+                     &output::fdiagvisc, &output::fx, &output::fy, &output::fdiag,
+                     &output::fz, &output::faniz, &output::f2d, &output::ffreeze,
+                     &output::fbeta}) {
+  if (f->is_open()) f->close();
+  f->clear();
  }
 }
 

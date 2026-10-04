@@ -109,11 +109,20 @@ cout << "Trento IS grid: x,y,etamaxG = " << xmaxG <<" "<< etamaxG << "  n_grid =
     }
    }
   }
+  // a failed read (e.g. "-nan", or TRENTo3D-2.0 raw output) never reaches eof: stop, do not loop
+  if (fin.fail()) {
+   cout << "I/O error with " << filename
+        << ": cannot read the density grid (expected TRENTO3d-1.0 layout without nan)" << endl;
+   exit(1);
+  }
 
   makeSmoothTable(npart);
 
   // delete source array
   for (int ix = 0; ix < n_grid; ix++) {
+   for (int iy = 0; iy < n_grid; iy++) {
+    delete[] source[ix][iy];
+   }
    delete[] source[ix];
   }
   delete[] source;

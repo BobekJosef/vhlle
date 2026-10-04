@@ -41,6 +41,7 @@ public:
        double _minz, double _maxz, double dt, double eCrit, bool _cartesian);
  ~Fluid();
  void initOutput(const char *dir, double tau0, bool hsOnly);
+ void closeOutput();
  void printDbetaHeader();
  void renameOutput(const char *dir);
  void checkOutputDirectory(std::string freezeoutFile);
