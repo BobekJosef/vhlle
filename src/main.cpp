@@ -37,6 +37,7 @@
 #include "icTrento.h"
 #include "icTest.h"
 #include "icTrento3d.h"
+#include "icKompost3d.h"
 #include "eos.h"
 #include "eo3.h"
 #include "eo1.h"
@@ -397,6 +398,10 @@ int main(int argc, char **argv) {
     }
    IcDynFlu *ic = new IcDynFlu(f, isInputFile.c_str(), gaussian_sigma, particles);
    ic->setIC(f, eos, particles, timeInit, minParticlesFO, timeInitFO);
+   delete ic;
+ } else if(icModel==12){ // IC from KoMPoST3D (MC-EKRT -> KoMPoST per eta_s slice), with flow and pi
+   IcKompost3d *ic = new IcKompost3d(f, isInputFile.c_str(), tau0);
+   ic->setIC(f, eos);
    delete ic;
  } else if(icModel==11){ // IC for testing purposes
    ICTest *ic = new ICTest();
