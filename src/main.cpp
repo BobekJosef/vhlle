@@ -319,8 +319,10 @@ int main(int argc, char **argv) {
      eos = new EoSCMF();
  else if (eosType == 4)
      eos = new EoSCMFe();
+ else if (eosType == 5)
+  eos = new EoSs("eos/WB2016_nf2p1p1.dat", 3);  // Wuppertal-Budapest 2016, nf=2+1+1, muB=0
  else {
-  cout << "eosType != 0,1,2,3,4\n";
+  cout << "eosType != 0,1,2,3,4,5\n";
   return 0;
  }
 
