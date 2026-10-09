@@ -63,6 +63,12 @@ double TransportCoeff::zetaS(double e, double T, double s, double P)
     else
       return ((e+P)/(s*T))*zetaS0 * exp(-pow(zetaSScaleBeta*(pow(e,0.25)-pow(zetaSPeakEpsilon,0.25)),2) / (2.0*pow(zetaSSigmaPlus,2)));
  }
+ else if(zetaSparam == 5)     // arXiv:2603.26413, Eqs. (10)-(11)
+ {
+    double w = 2. * zetaSWidth / (1. + exp(zetaSAsym * (T - zetaSPeakT) / zetaSWidth));
+    return zetaSMax / (1. + ((T - zetaSPeakT) / w) * ((T - zetaSPeakT) / w));
+ }
+ return 0.;
 }
 
 void TransportCoeff::getEta(double e, double rho, double T, double muB, double s, double P, double &_etaS, double &_zetaS) {

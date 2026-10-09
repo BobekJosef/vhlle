@@ -83,7 +83,8 @@ double xmin {-5.0}, xmax {5.0}, ymin {-5.0}, ymax {5.0}, etamin {-5.0},
   etamax {5.0}, tau0 {1.0}, tauMax {20.0}, tauResize {4.0}, dtau {0.05},
   etaS {0.08}, zetaS {0.0}, eCrit {0.5}, etaSEpsilonMin {5.}, al {0.}, ah {0.}, aRho {0.}, T0 {0.15},
   etaSMin {0.08}, etaSShiftMuB {0.}, etaSScaleMuB {0.}, zetaSPeakEpsilon {5.},
-  zetaSScaleBeta {0.103}, zetaSSigmaMinus {0.1}, zetaSSigmaPlus {0.1}, epsilon0, Rgt {1.0},
+  zetaSScaleBeta {0.103}, zetaSSigmaMinus {0.1}, zetaSSigmaPlus {0.1},
+  zetaSMax {0.09}, zetaSPeakT {0.223}, zetaSWidth {0.060}, zetaSAsym {-0.7}, epsilon0, Rgt {1.0},
   Rgz {1.0}, impactPar, s0ScaleFactor, gaussian_sigma {0.0};
 string collSystem, outputDir {"data"}, isInputFile, vtk_values {""};
 int icModel {1},glauberVariable  {1};  // icModel=1 for pure Glauber, 2 for table input (Glissando etc)
@@ -126,6 +127,10 @@ void readParameters(char *parFile) {
         {"zetaSPeakEpsilon", [](const string& value) { zetaSPeakEpsilon = atof(value.c_str()); }},
         {"zetaSSigmaMinus", [](const string& value) { zetaSSigmaMinus = atof(value.c_str()); }},
         {"zetaSSigmaPlus", [](const string& value) { zetaSSigmaPlus = atof(value.c_str()); }},
+        {"zetaSMax", [](const string& value) { zetaSMax = atof(value.c_str()); }},
+        {"zetaSPeakT", [](const string& value) { zetaSPeakT = atof(value.c_str()); }},
+        {"zetaSWidth", [](const string& value) { zetaSWidth = atof(value.c_str()); }},
+        {"zetaSAsym", [](const string& value) { zetaSAsym = atof(value.c_str()); }},
         {"epsilon0", [](const string& value) { epsilon0 = atof(value.c_str()); }},
         {"Rg", [](const string& value) { Rgt = atof(value.c_str()); }},
         {"Rgz", [](const string& value) { Rgz = atof(value.c_str()); }},
@@ -227,6 +232,12 @@ void printParameters() {
     cout << "zetaSScaleBeta = " << zetaSScaleBeta << endl;
     cout << "zetaSSigmaMinus = " << zetaSSigmaMinus << endl;
     cout << "zetaSSigmaPlus = " << zetaSSigmaPlus << endl;
+  }
+  if (zetaSparam == 5){
+    cout << "zetaSMax = " << zetaSMax << endl;
+    cout << "zetaSPeakT = " << zetaSPeakT << endl;
+    cout << "zetaSWidth = " << zetaSWidth << endl;
+    cout << "zetaSAsym = " << zetaSAsym << endl;
   }
   if (icModel==10) {
     cout << "Gaussian_Sigma = " << gaussian_sigma << endl;
@@ -341,7 +352,8 @@ int main(int argc, char **argv) {
 
  // transport coefficients
  trcoeff = new TransportCoeff(etaS, zetaS, ah, al, aRho, T0, etaSMin, etaSEpsilonMin, etaSShiftMuB,
-  etaSScaleMuB, zetaSPeakEpsilon, zetaSScaleBeta, zetaSSigmaMinus, zetaSSigmaPlus,  eos, etaSparam, zetaSparam);
+  etaSScaleMuB, zetaSPeakEpsilon, zetaSScaleBeta, zetaSSigmaMinus, zetaSSigmaPlus,
+  zetaSMax, zetaSPeakT, zetaSWidth, zetaSAsym, eos, etaSparam, zetaSparam);
 
  f = new Fluid(eos, eosH, trcoeff, nx, ny, nz, xmin, xmax, ymin, ymax, etamin,
                etamax, dtau, eCrit, cartesian);
